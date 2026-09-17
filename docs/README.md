@@ -35,6 +35,8 @@ MoonBit 側(`lib/` `report/` `moba/` `cmd/*`)と TypeScript 側(`experiments/*`)
 | **繰り返させたくない選択はコードで消す** | 言葉で禁止するより安く確実 | 本リポジトリ | [05](05-browser-chaos.md#変化-2--3-選択肢から消すほうが言葉で言うより効く) |
 | **幅はランダム、深さは Jev** | 置き換えではなく併用。8 手深いゴール到達 0/3 → 3/3 | 本リポジトリ | [05](05-browser-chaos.md#1-結果) |
 | **共有 state + 複数エージェント = fan-out の理想形** | 3 キャラの判断が 1 リクエスト。73 ms/キャラ | 本リポジトリ | [02](02-moba.md#1-なぜこの題材が-jev-に合うか-チーム視界--1-state-3-質問) |
+| **独立エージェントは対称ゲームの膠着を解く** | scripted 3/3 引き分け → Jev 同士 6/6 決着 | 本リポジトリ | [10](10-jev-vs-jev.md#2-結果--独立させると決着する) |
+| **視界の霧はプロセス境界で強制できる** | 相手の観測がワイヤーに乗らない。並行で 1 tick≈1 リクエスト | 本リポジトリ | [10](10-jev-vs-jev.md#1-構成--視界の霧を配線で強制する) |
 | **criteria をその場の合法手にする** | 不正手が表現不能になる。MOBA 489 判断・チェス 37 手で 0 件 | 本リポジトリ | [02](02-moba.md#2-結果), [03](03-chess.md#2-一番の発見-反則手が表現できないことの価値) |
 | **confidence を「難しさ」の指標に使う** | チェスでは ρ=-0.47 で効く。ただし条件つき | 本リポジトリ | [03](03-chess.md#3-confidence-が難しさを測っている), [07](07-escalation.md) |
 | **質問はエージェント、閾値はデータ** | 閾値を合わせ直すと 10〜22 → 21〜22 に収束 | 本リポジトリ | [04](04-agent-built-prompts.md#2-原因は設計ではなく閾値だった) |
@@ -76,6 +78,7 @@ MoonBit 側(`lib/` `report/` `moba/` `cmd/*`)と TypeScript 側(`experiments/*`)
 | [07](07-escalation.md) | confidence でエスカレーションする二層構成(提案 A の検証) | ✅ |
 | [08](08-skill-suggestion.md) | [skill suggestion cookbook](https://docs.typesafe.ai/cookbooks/skill_suggestion) の追試(mizchi/skills 68 スキル) | ✅ |
 | [09](09-guardrails.md) | [LLM guardrails cookbook](https://docs.typesafe.ai/cookbooks/llm_guardrails) の追試(入出力スクリーニング) | ✅ |
+| [10](10-jev-vs-jev.md) | Jev vs Jev を独立プロセスで対戦(referee + player ×2) | ✅ |
 
 ## この探索から見えている一般則
 
