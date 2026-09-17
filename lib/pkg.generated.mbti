@@ -1,0 +1,68 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "mizchi/jev-playground/lib"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+
+// Errors
+pub(all) suberror ApiError {
+  Http(Int, String, String)
+  InvalidResponse(String)
+} derive(@debug.Debug)
+
+// Types and methods
+pub(all) enum Answer {
+  NoulAnswer(Double)
+  ChoiceAnswer(String, Double, Map[String, Double])
+  ScoreAnswer(Double, Double, Map[String, String], Map[String, Double])
+}
+pub fn Answer::from_json(Json) -> Self raise
+pub fn Answer::to_json(Self) -> Json
+
+pub struct Client {
+  api_key : String
+  base_url : String
+}
+pub async fn Client::list_models(Self) -> Array[Model]
+pub fn Client::new(String) -> Self
+pub async fn Client::system_one(Self, SystemOneRequest) -> SystemOneResponse
+pub fn Client::with_base_url(String, String) -> Self
+
+pub(all) struct Model {
+  name : String
+  description : String
+  release_date : String
+}
+pub fn Model::from_json(Json) -> Self raise
+pub fn Model::to_json(Self) -> Json
+
+pub(all) enum Question {
+  Noul(String?, String?, String?)
+  Choice(String?, Map[String, String])
+  Score(String?, Array[String])
+}
+pub fn Question::from_json(Json) -> Self raise
+pub fn Question::to_json(Self) -> Json
+
+pub(all) struct SystemOneRequest {
+  state : Json
+  model : String
+  questions : Map[String, Question]
+}
+pub fn SystemOneRequest::to_json(Self) -> Json
+
+pub(all) struct SystemOneResponse {
+  model : String
+  answers : Map[String, Answer]
+  input_tokens : Int
+  output_tokens : Int
+}
+pub fn SystemOneResponse::from_json(Json) -> Self raise
+pub fn SystemOneResponse::to_json(Self) -> Json
+
+// Type aliases
+
+// Traits
