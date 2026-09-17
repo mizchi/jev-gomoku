@@ -1,0 +1,234 @@
+///|
+/// The scripted baseline, and the team observation both policies are limited
+/// to.
+///
+/// The observation is the contract of the experiment: a policy — scripted or
+/// Jev — may only read what is in here, which is what the team can actually
+/// see. Team vision is shared, so there is exactly one observation per team
+/// per tick, and that is what makes three champions' decisions fit in one
+/// request.
+
+///|
+/// What a team remembers about enemies it can no longer see. Real fog of war
+/// is not just "unknown": you know where you last saw someone.
+pub struct Memory {
+  /// Last node each enemy champion was seen on, or -1.
+  last_seen_node : Array[Int]
+  /// Tick at which that sighting happened.
+  last_seen_tick : Array[Int]
+}
+
+///|
+pub fn Memory::new() -> Memory {
+  {
+    last_seen_node: Array::make(6, -1),
+    last_seen_tick: Array::make(6, -1),
+  }
+}
+
+///|
+pub fn Memory::observe(self : Memory, g : Game, team : Int) -> Unit {
+  for e in g.visible_enemies(team) {
+    self.last_seen_node[e.id] = e.node
+    self.last_seen_tick[e.id] = g.tick
+  }
+}
+
+///|
+/// The enemy structure in `lane` that a team should be pushing, or the enemy
+/// base once both towers are down.
+pub fn Game::lane_objective(self : Game, team : Int, lane : String) -> Int {
+  let enemy = if team == TEAM_A { TEAM_B } else { TEAM_A }
+  for s in self.structures {
+    if s.team == enemy && s.alive() && !s.is_base && node_lane[s.node] == lane {
+      return s.node
+    }
+  }
+  // Nothing left in that lane: head for whatever is still standing.
+  for s in self.structures {
+    if s.team == enemy && s.alive() && !s.is_base {
+      return s.node
+    }
+  }
+  base_of(enemy)
+}
+
+///|
+/// The scripted opponent: retreat when low, fight when it has the numbers,
+/// otherwise push its own lane and farm. Deliberately a decent-but-simple
+/// bot, so beating it means something and losing to it means something.
+pub fn scripted_action(g : Game, c : Champ) -> Action {
+  let legal = g.legal_actions(c)
+  if legal.is_empty() {
+    return Hold
+  }
+  let base = base_of(c.team)
+  let enemy_team = if c.team == TEAM_A { TEAM_B } else { TEAM_A }
+  let here_enemies = g.champs_at(c.node, enemy_team)
+  let here_allies = g.champs_at(c.node, c.team)
+
+  // Badly hurt: go home, unless standing next to a kill.
+  let finishable = here_enemies.filter(e => e.hp <= 14)
+  if c.hp <= 35 && finishable.is_empty() {
+    if legal.contains(Recall) {
+      return Recall
+    }
+  }
+  if !finishable.is_empty() {
+    return AttackChamp(finishable[0].id)
+  }
+  if !here_enemies.is_empty() {
+    // Fight with the numbers, on a health lead, or simply while healthy.
+    // An earlier version backed off on an even matchup, which turned every
+    // game into a lane standoff where no structure was ever touched.
+    let outnumber = here_allies.length() >= here_enemies.length()
+    let healthier = c.hp >= here_enemies[0].hp
+    if outnumber || healthier || c.hp > 55 {
+      return AttackChamp(here_enemies[0].id)
+    }
+    let away = step_toward(c.node, base)
+    if away != c.node && legal.contains(Move(away)) {
+      return Move(away)
+    }
+    return AttackChamp(here_enemies[0].id)
+  }
+  // Standing under an enemy structure with nobody to fight: hit it.
+  if legal.contains(AttackStructure) {
+    return AttackStructure
+  }
+  // Walk toward this champion's objective; farm when already on the way.
+  let target = g.lane_objective(c.team, c.role)
+  if c.node == target {
+    if legal.contains(Farm) {
+      return Farm
+    }
+    return Hold
+  }
+  let next = step_toward(c.node, target)
+  if next != c.node && legal.contains(Move(next)) {
+    return Move(next)
+  }
+  if legal.contains(Farm) {
+    return Farm
+  }
+  Hold
+}
+
+// ------------------------------------------------------------- observation
+
+///|
+/// Everything `team` is allowed to know this tick, as JSON. Enemy champions
+/// appear only when visible; otherwise they show up under
+/// `enemies_last_known` with how stale the sighting is.
+pub fn Game::observation(self : Game, team : Int, mem : Memory) -> Json {
+  let enemy_team = if team == TEAM_A { TEAM_B } else { TEAM_A }
+  let seen = self.vision(team)
+  let enemy_base = base_of(enemy_team)
+  let own_base = base_of(team)
+
+  let allies = []
+  for c in self.champs {
+    if c.team != team {
+      continue
+    }
+    if c.alive() {
+      allies.push(
+        Json({
+          "id": Json(c.id),
+          "name": Json(c.name),
+          "lane": Json(c.role),
+          "hp": Json(c.hp),
+          "at": Json(node_name(c.node)),
+          "gold": Json(c.gold),
+          "hops_to_enemy_base": Json(hops(c.node, enemy_base)),
+          "hops_to_home": Json(hops(c.node, own_base)),
+        }),
+      )
+    } else {
+      allies.push(
+        Json({
+          "id": Json(c.id),
+          "name": Json(c.name),
+          "lane": Json(c.role),
+          "dead_for_ticks": Json(c.respawn),
+        }),
+      )
+    }
+  }
+
+  let visible = []
+  for e in self.visible_enemies(team) {
+    visible.push(
+      Json({
+        "id": Json(e.id),
+        "name": Json(e.name),
+        "hp": Json(e.hp),
+        "at": Json(node_name(e.node)),
+      }),
+    )
+  }
+
+  // Fog of war: what we knew, and how old it is.
+  let remembered = []
+  for e in self.champs {
+    if e.team != team && e.alive() && !seen[e.node] {
+      let node = mem.last_seen_node[e.id]
+      if node >= 0 {
+        remembered.push(
+          Json({
+            "name": Json(e.name),
+            "last_seen_at": Json(node_name(node)),
+            "ticks_ago": Json(self.tick - mem.last_seen_tick[e.id]),
+          }),
+        )
+      } else {
+        remembered.push(
+          Json({ "name": Json(e.name), "last_seen_at": Json("never") }),
+        )
+      }
+    }
+  }
+
+  let structures = []
+  for s in self.structures {
+    structures.push(
+      Json({
+        "at": Json(node_name(s.node)),
+        "kind": Json(if s.is_base { "base" } else { "tower" }),
+        "side": Json(if s.team == team { "ours" } else { "theirs" }),
+        "hp": Json(s.hp),
+      }),
+    )
+  }
+
+  let visible_nodes = []
+  for i in 0..<N_NODES {
+    if seen[i] {
+      visible_nodes.push(Json(node_names[i]))
+    }
+  }
+
+  Json({
+    "game": Json("3v3 MOBA, two lanes and a jungle"),
+    "objective": Json(
+      "Destroy the enemy base. Both enemy towers must fall before the base can be attacked.",
+    ),
+    "rules": Json(
+      "One move per tick to an adjacent node. Standing on an enemy tower takes damage every tick. Recalling teleports home and heals. Gold from farming and kills adds damage.",
+    ),
+    "tick": Json(self.tick),
+    "you_are": Json(if team == TEAM_A { "team A" } else { "team B" }),
+    "your_base": Json(node_name(own_base)),
+    "enemy_base": Json(node_name(enemy_base)),
+    "enemy_base_attackable": Json(self.base_exposed(enemy_team)),
+    "our_base_attackable": Json(self.base_exposed(team)),
+    "your_champions": Json(allies),
+    "enemies_visible_now": Json(visible),
+    "enemies_last_known": Json(remembered),
+    "structures": Json(structures),
+    "nodes_you_can_see": Json(visible_nodes),
+    "map": Json(
+      "a_base-{a_top,a_bot,a_jg}; a_top-m_top-b_top-b_base; a_bot-m_bot-b_bot-b_base; a_jg-m_jg-b_jg-b_base; m_jg also touches m_top and m_bot",
+    ),
+  })
+}

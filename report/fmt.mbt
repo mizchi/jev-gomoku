@@ -182,3 +182,8 @@ pub fn probs_line(probs : Map[String, Double]) -> String {
   }
   parts.join(" ")
 }
+
+///|
+pub fn d0(v : Double) -> String {
+  fixed(v, 0)
+}
