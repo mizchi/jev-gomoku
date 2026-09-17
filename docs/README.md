@@ -7,6 +7,21 @@
 > 対象は `jev-latest`(応答は `jev-1.13.0`)、実測は 2026-09。
 > 料金は入力 `$0.042 / MTok`・出力無料なので、ここの実験はどれも 1 回数セント未満です。
 
+## 走らせ方
+
+```bash
+export TYPESAFEAI_API_KEY=your_key_here
+moon run --target native cmd/patterns --                       # 00: 公式パターン集の実測
+moon run --target native cmd/shellrisk --                      # 01: シェルコマンド判定
+moon run --target native cmd/moba -- --a jev --b scripted      # 02: 3v3 MOBA
+cd experiments/chess          && npm i && npx tsx src/run.ts   # 03: チェス vs Sonnet 5
+cd experiments/agent-questions && npm i && npx tsx src/run.ts  # 04: エージェントに質問を書かせる
+cd experiments/browser-chaos  && npm i && npx tsx src/run-spa.ts # 05: ブラウザ探索
+```
+
+MoonBit 側(`lib/` `report/` `moba/` `cmd/*`)と TypeScript 側(`experiments/*`)に
+分かれていて、TS 側は `experiments/shared/jev.ts` が `lib/` と同じ役割です。
+
 ## 効いたパターン(要約)
 
 | パターン | 効果 | 出典 | 実測 |
@@ -50,6 +65,7 @@
 | [03](03-chess.md) | チェス、Jev vs Claude Sonnet 5 | ✅ |
 | [04](04-agent-built-prompts.md) | コーディングエージェントに質問を組ませて動的にパイプラインを作る | ✅ |
 | [05](05-browser-chaos.md) | [chaosbringer](https://github.com/mizchi/chaosbringer) の次操作選択を Jev に置き換える | ✅ |
+| [06](06-ideas.md) | 次に効きそうなことの提案(優先順位つき) | 📝 |
 
 ## この探索から見えている一般則
 
