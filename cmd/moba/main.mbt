@@ -47,59 +47,6 @@ fn Stats::new() -> Stats {
   }
 }
 
-// ------------------------------------------------------------ action naming
-
-///|
-/// A short tactical note per action, in the spirit of the gomoku hints: the
-/// model should not have to re-derive from the map what the code already
-/// knows.
-fn describe(g : @game.Game, c : @game.Champ, a : @game.Action) -> String {
-  match a {
-    @game.Action::Move(n) => {
-      let enemy_team = if c.team == @game.TEAM_A {
-        @game.TEAM_B
-      } else {
-        @game.TEAM_A
-      }
-      let there = g.champs_at(n, enemy_team)
-      let seen = g.vision(c.team)
-      let tower = match g.structure_at(n) {
-        Some(s) => {
-          let side = if s.team == c.team { "our" } else { "their" }
-          let kind = if s.is_base { "base" } else { "tower" }
-          "; \{side} \{kind} here (hp \{s.hp})"
-        }
-        None => ""
-      }
-      let danger = if !seen[n] {
-        "; NOT VISIBLE - could be walking into anything"
-      } else if there.length() > 0 {
-        "; \{there.length()} enemy champion(s) standing there"
-      } else {
-        ""
-      }
-      let enemy_base = @game.base_of(enemy_team)
-      "move to \{@game.node_name(n)} (\{@game.node_lane[n]} lane, \{@game.hops(n, enemy_base)} hops from the enemy base)\{tower}\{danger}"
-    }
-    @game.Action::AttackChamp(id) => {
-      let e = g.champs[id]
-      "attack \{e.name} (hp \{e.hp}) here"
-    }
-    @game.Action::AttackStructure =>
-      match g.structure_at(c.node) {
-        Some(s) => {
-          let kind = if s.is_base { "BASE" } else { "tower" }
-          "attack the enemy \{kind} here (hp \{s.hp})"
-        }
-        None => "attack the structure here"
-      }
-    @game.Action::Farm =>
-      "farm here for +\{@game.camp_gold(c.node)} gold (safe, no progress on objectives)"
-    @game.Action::Recall => "teleport home and heal (gives up this position)"
-    @game.Action::Hold => "stay put"
-  }
-}
-
 // -------------------------------------------------------------- jev a team
 
 ///|
@@ -135,7 +82,7 @@ async fn jev_team_actions(
     legal_by_champ[c.id] = legal
     let criteria : Map[String, String] = Map([])
     for a in legal {
-      criteria[a.to_string()] = describe(g, c, a)
+      criteria[a.to_string()] = g.describe_action(c, a)
     }
     qs["champ_\{c.id}"] = @lib.Question::choice(
       criteria,
