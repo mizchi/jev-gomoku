@@ -40,7 +40,13 @@ pub fn Game::replay_meta(
         "team": Json(if c.team == TEAM_A { "A" } else { "B" }),
         "role": Json(c.role),
         "kind": Json(c.kind),
-        "deals": Json(if c.dmg_type == DMG_PHYSICAL { "physical" } else { "magic" }),
+        "deals": Json(
+          if c.dmg_type == DMG_PHYSICAL {
+            "physical"
+          } else {
+            "magic"
+          },
+        ),
         "max_hp": Json(c.max_hp),
         "armor": Json(c.armor),
         "magic_resist": Json(c.mr),
@@ -119,11 +125,13 @@ pub fn Game::replay_frame(self : Game) -> Json {
 pub fn Game::replay_result(self : Game, winner : Int) -> Json {
   Json({
     "type": Json("result"),
-    "winner": Json(match winner {
-      1 => "A"
-      2 => "B"
-      _ => "draw"
-    }),
+    "winner": Json(
+      match winner {
+        1 => "A"
+        2 => "B"
+        _ => "draw"
+      },
+    ),
     "ticks": Json(self.tick),
     "a_structure_hp": Json(self.structure_hp(TEAM_A)),
     "b_structure_hp": Json(self.structure_hp(TEAM_B)),

@@ -172,14 +172,14 @@ pub fn Game::with_comps(comp_a : Array[String], comp_b : Array[String]) -> Game 
     champs.push(make(i, TEAM_B, b_start[i], comp_b))
   }
   let structures = [
-    { node: 1, team: TEAM_A, hp: 100, max_hp: 100, is_base: false },
-    { node: 5, team: TEAM_A, hp: 100, max_hp: 100, is_base: false },
-    { node: A_BASE, team: TEAM_A, hp: 150, max_hp: 150, is_base: true },
-    { node: 3, team: TEAM_B, hp: 100, max_hp: 100, is_base: false },
-    { node: 7, team: TEAM_B, hp: 100, max_hp: 100, is_base: false },
-    { node: B_BASE, team: TEAM_B, hp: 150, max_hp: 150, is_base: true },
+    { node: 1, team: TEAM_A, hp: 100, max_hp: 100, is_base: false, },
+    { node: 5, team: TEAM_A, hp: 100, max_hp: 100, is_base: false, },
+    { node: A_BASE, team: TEAM_A, hp: 150, max_hp: 150, is_base: true, },
+    { node: 3, team: TEAM_B, hp: 100, max_hp: 100, is_base: false, },
+    { node: 7, team: TEAM_B, hp: 100, max_hp: 100, is_base: false, },
+    { node: B_BASE, team: TEAM_B, hp: 150, max_hp: 150, is_base: true, },
   ]
-  { champs, structures, tick: 0, winner: 0, log: [] }
+  { champs, structures, tick: 0, winner: 0, log: [], }
 }
 
 ///|
@@ -352,10 +352,7 @@ pub fn Game::step(self : Game, actions : Map[Int, Action]) -> Unit {
       continue
     }
     match actions.get(c.id) {
-      Some(Move(n)) =>
-        if adjacency[c.node].contains(n) {
-          c.node = n
-        }
+      Some(Move(n)) => if adjacency[c.node].contains(n) { c.node = n }
       Some(Recall) => {
         c.node = base_of(c.team)
         events.push("\{c.name} recalled")
@@ -438,7 +435,9 @@ pub fn Game::step(self : Game, actions : Map[Int, Action]) -> Unit {
           let killer = self.champs[killer_id]
           killer.kills += 1
           killer.gold += 150
-          events.push("\{killer.name} killed \{target.name} at \{node_name(target.node)}")
+          events.push(
+            "\{killer.name} killed \{target.name} at \{node_name(target.node)}",
+          )
         }
         None => ()
       }

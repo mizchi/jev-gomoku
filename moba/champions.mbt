@@ -134,7 +134,11 @@ pub(all) struct Comp {
 /// (no frontline, one damage type the enemy can itemise against). `classic` is
 /// the pre-archetype uniform team, as a control.
 pub let tournament_comps : Array[Comp] = [
-  { name: "meta", picks: ["tank", "marksman", "mage"], note: "frontline + AD + AP" },
+  {
+    name: "meta",
+    picks: ["tank", "marksman", "mage"],
+    note: "frontline + AD + AP",
+  },
   {
     name: "bruiser_mix",
     picks: ["bruiser", "marksman", "support"],

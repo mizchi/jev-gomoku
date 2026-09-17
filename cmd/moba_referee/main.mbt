@@ -99,7 +99,7 @@ struct Client {
 }
 
 ///|
-async fn serve(opts : Opts) -> Unit raise {
+async fn serve(opts : Opts) -> Unit {
   let server = @socket.TcpServer(
     @socket.Addr::parse("127.0.0.1:\{opts.port}"),
     reuse_addr=true,
@@ -111,10 +111,8 @@ async fn serve(opts : Opts) -> Unit raise {
     let (conn, _addr) = server.accept()
     let hello = read_line(conn)
     let team = parse_hello(hello)
-    clients.push({ conn, team })
-    @stdio.stdout.write(
-      "referee: team \{team_name(team)} connected\n",
-    )
+    clients.push({ conn, team, })
+    @stdio.stdout.write("referee: team \{team_name(team)} connected\n")
   }
   let client_a = find_client(clients, @game.TEAM_A)
   let client_b = find_client(clients, @game.TEAM_B)
@@ -147,12 +145,14 @@ async fn play_game(
   client_a : Client,
   client_b : Client,
   index : Int,
-) -> Int raise {
+) -> Int {
   let g = @game.Game::with_comps(opts.comp_a, opts.comp_b)
   let mem_a = @game.Memory::new()
   let mem_b = @game.Memory::new()
   let replay = [
-    g.replay_meta("jev", "jev", opts.comp_a, opts.comp_b, opts.max_ticks).stringify(),
+    g
+    .replay_meta("jev", "jev", opts.comp_a, opts.comp_b, opts.max_ticks)
+    .stringify(),
     g.replay_frame().stringify(),
   ]
   if opts.verbose {
@@ -171,8 +171,12 @@ async fn play_game(
     // parallel. Each returns champion-id -> chosen action string.
     let replies : Map[Int, Map[Int, String]] = Map([])
     @async.with_task_group(group => {
-      group.spawn_bg(() => replies.set(@game.TEAM_A, exchange(client_a.conn, turn_a)))
-      group.spawn_bg(() => replies.set(@game.TEAM_B, exchange(client_b.conn, turn_b)))
+      group.spawn_bg(() => {
+        replies.set(@game.TEAM_A, exchange(client_a.conn, turn_a))
+      })
+      group.spawn_bg(() => {
+        replies.set(@game.TEAM_B, exchange(client_b.conn, turn_b))
+      })
     })
 
     // Resolve each team's strings back into actions against the live state.
@@ -188,7 +192,9 @@ async fn play_game(
               // A player naming a move it was not offered: hold, and note it.
               None =>
                 if opts.verbose {
-                  @stdio.stdout.write("referee: \{c.name} sent illegal '\{s}', holding\n")
+                  @stdio.stdout.write(
+                    "referee: \{c.name} sent illegal '\{s}', holding\n",
+                  )
                 }
             }
           }
@@ -217,17 +223,20 @@ async fn play_game(
   }
   // Tell both teams the game is over, so they stop waiting on a turn.
   let over = Json({
-    "type": Json("over"),
-    "tick": Json(g.tick),
-    "winner": Json(match winner {
-      1 => "A"
-      2 => "B"
-      _ => "draw"
-    }),
-    "reason": Json(g.over_reason()),
-    "a_structure_hp": Json(a_hp),
-    "b_structure_hp": Json(b_hp),
-  }).stringify() + "\n"
+      "type": Json("over"),
+      "tick": Json(g.tick),
+      "winner": Json(
+        match winner {
+          1 => "A"
+          2 => "B"
+          _ => "draw"
+        },
+      ),
+      "reason": Json(g.over_reason()),
+      "a_structure_hp": Json(a_hp),
+      "b_structure_hp": Json(b_hp),
+    }).stringify() +
+    "\n"
   client_a.conn.write(over)
   client_b.conn.write(over)
   let wlabel = match winner {
@@ -258,16 +267,14 @@ async fn exchange(conn : @socket.Tcp, turn : String) -> Map[Int, String] {
   let out : Map[Int, String] = Map([])
   let line = try {
     conn.write(turn)
-    (conn.read_until("\n")).unwrap_or("")
+    conn.read_until("\n").unwrap_or("")
   } catch {
     _ => ""
   }
   if line == "" {
     return out
   }
-  let json = @json.parse(line) catch {
-    _ => return out
-  }
+  let json = @json.parse(line) catch { _ => return out }
   match json {
     Json::Object(fields) =>
       match fields.get("actions") {
@@ -289,7 +296,7 @@ async fn exchange(conn : @socket.Tcp, turn : String) -> Map[Int, String] {
 // ----------------------------------------------------------------- plumbing
 
 ///|
-async fn read_line(conn : @socket.Tcp) -> String raise {
+async fn read_line(conn : @socket.Tcp) -> String {
   match conn.read_until("\n") {
     Some(s) => s
     None => fail("connection closed")
@@ -332,7 +339,10 @@ fn team_name(team : Int) -> String {
 ///|
 fn int_opt(matches : @argparse.Matches, key : String, dflt : Int) -> Int {
   match matches.values.get(key) {
-    Some(arr) if arr.length() > 0 => @string.from_str(arr[0]) catch { _ => dflt }
+    Some(arr) if arr.length() > 0 =>
+      @string.from_str(arr[0]) catch {
+        _ => dflt
+      }
     _ => dflt
   }
 }

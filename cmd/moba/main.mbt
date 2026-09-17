@@ -27,6 +27,9 @@ struct Opts {
   tournament : Bool
   /// Round-robin the named comps as pure teamfights (composition only).
   arena : Bool
+  /// Ask Jev to draft a composition from the raw archetype stats, and compare
+  /// its ranking to the empirical arena. Needs an API key.
+  draft : Bool
   /// If non-empty, write the last game's replay to this file as JSON lines.
   replay : String
 }
@@ -105,8 +108,7 @@ async fn jev_team_actions(
   // Team-level reads, riding along on a state that is already being sent.
   qs["danger"] = @lib.Question::score(
     [
-      "Safe, keep pushing", "Trade carefully", "Back off and regroup",
-      "Our base is about to fall",
+      "Safe, keep pushing", "Trade carefully", "Back off and regroup", "Our base is about to fall",
     ],
     instructions="How much danger is our team in right now?",
   )
@@ -121,7 +123,7 @@ async fn jev_team_actions(
 
   let state = g.observation(team, mem)
   let t0 = @env.now()
-  let resp = client.system_one({ state, model, questions: qs }) catch {
+  let resp = client.system_one({ state, model, questions: qs, }) catch {
     _ => {
       // The game must keep moving; fall back to the scripted policy and say so.
       stats.fallback_ticks += 1
@@ -197,7 +199,15 @@ async fn play_game(
   let mem_a = @game.Memory::new()
   let mem_b = @game.Memory::new()
   let replay = [
-    g.replay_meta(opts.team_a, opts.team_b, opts.comp_a, opts.comp_b, opts.max_ticks).stringify(),
+    g
+    .replay_meta(
+      opts.team_a,
+      opts.team_b,
+      opts.comp_a,
+      opts.comp_b,
+      opts.max_ticks,
+    )
+    .stringify(),
     g.replay_frame().stringify(), // tick 0, the opening state
   ]
   if opts.verbose {
@@ -218,7 +228,13 @@ async fn play_game(
           )
         }
         let chosen = jev_team_actions(
-          client, opts.model, g, team, mem, stats, opts.verbose,
+          client,
+          opts.model,
+          g,
+          team,
+          mem,
+          stats,
+          opts.verbose,
         )
         for e in chosen {
           actions[e.0] = e.1
@@ -256,14 +272,18 @@ async fn play_game(
     0
   }
   replay.push(g.replay_result(winner).stringify())
-  { winner, ticks: g.tick, a_structure_hp: a_hp, b_structure_hp: b_hp, replay }
+  { winner, ticks: g.tick, a_structure_hp: a_hp, b_structure_hp: b_hp, replay, }
 }
 
 ///|
 /// A scripted-only game with the given comps, run to completion. No client, no
 /// API — this is the free path the tournament uses to measure composition
 /// against composition with the policy held fixed.
-fn play_scripted(comp_a : Array[String], comp_b : Array[String], max_ticks : Int) -> Int {
+fn play_scripted(
+  comp_a : Array[String],
+  comp_b : Array[String],
+  max_ticks : Int,
+) -> Int {
   let g = @game.Game::with_comps(comp_a, comp_b)
   while g.winner == 0 && g.tick < max_ticks {
     let actions : Map[Int, @game.Action] = Map([])
@@ -293,7 +313,11 @@ fn play_scripted(comp_a : Array[String], comp_b : Array[String], max_ticks : Int
 /// This isolates composition from map macro — no lanes, no farming, no towers,
 /// just "which five-stat team wins the fight". Returns the winning team, or 0
 /// if neither side is wiped inside the cap.
-fn arena_fight(comp_a : Array[String], comp_b : Array[String], max_ticks : Int) -> Int {
+fn arena_fight(
+  comp_a : Array[String],
+  comp_b : Array[String],
+  max_ticks : Int,
+) -> Int {
   let g = @game.Game::with_comps(comp_a, comp_b)
   let arena = 9 // m_jg: central, no tower, no base heal
   g.place_all(arena)
@@ -318,7 +342,11 @@ fn arena_fight(comp_a : Array[String], comp_b : Array[String], max_ticks : Int) 
       if !c.alive() || c.node != arena {
         continue
       }
-      let enemy = if c.team == @game.TEAM_A { @game.TEAM_B } else { @game.TEAM_A }
+      let enemy = if c.team == @game.TEAM_A {
+        @game.TEAM_B
+      } else {
+        @game.TEAM_A
+      }
       let foes = g.champs_at(arena, enemy)
       if foes.is_empty() {
         continue
@@ -344,8 +372,7 @@ fn run_arena(max_ticks : Int) -> Unit {
   let comps = @game.tournament_comps
   let n = comps.length()
   @report.header(
-    "MOBA synergy — teamfight arena",
-    "3v3 to the death on one node, focus fire + peel, composition is the only variable",
+    "MOBA synergy — teamfight arena", "3v3 to the death on one node, focus fire + peel, composition is the only variable",
   )
   let wins = Array::make(n, 0)
   let losses = Array::make(n, 0)
@@ -383,7 +410,9 @@ fn run_arena(max_ticks : Int) -> Unit {
     let fl = if c.has_frontline() { "yes" } else { "no " }
     let dm = if c.mixed_damage() { "AD+AP" } else { "mono " }
     let wld = "\{wins[idx]}-\{losses[idx]}-\{draws[idx]}"
-    println("   \{rank}    \{pad(c.name, 12)}  \{fl}        \{dm}    \{pad(wld, 7)}  \{c.picks.join(", ")}")
+    println(
+      "   \{rank}    \{pad(c.name, 12)}  \{fl}        \{dm}    \{pad(wld, 7)}  \{c.picks.join(", ")}",
+    )
     rank += 1
   }
   println("")
@@ -397,7 +426,9 @@ fn run_arena(max_ticks : Int) -> Unit {
 fn run_tournament(max_ticks : Int) -> Unit {
   let comps = @game.tournament_comps
   let n = comps.length()
-  @report.header("MOBA synergy tournament", "scripted vs scripted, each ordered pair once")
+  @report.header(
+    "MOBA synergy tournament", "scripted vs scripted, each ordered pair once",
+  )
   // wins[i] = games comp i won; also track draws so nothing is hidden.
   let wins = Array::make(n, 0)
   let losses = Array::make(n, 0)
@@ -438,9 +469,165 @@ fn run_tournament(max_ticks : Int) -> Unit {
     let wld = "\{wins[idx]}-\{losses[idx]}-\{draws[idx]}"
     let name = pad(c.name, 12)
     let picks = c.picks.join(", ")
-    println("   \{rank}    \{name}  \{fl}        \{dm}    \{pad(wld, 7)} \{picks}")
+    println(
+      "   \{rank}    \{name}  \{fl}        \{dm}    \{pad(wld, 7)} \{picks}",
+    )
     rank += 1
   }
+  println("")
+}
+
+///|
+/// Ask Jev to rank the compositions from the raw archetype stats and the bare
+/// mechanics — without being told that a frontline or mixed damage is good —
+/// then set its ranking beside the empirical arena. The question this answers:
+/// can Jev *choose* the correct synergy, not just play it? The state gives only
+/// stats and rules; Jev has to infer that a body which soaks hits and a damage
+/// type that dodges the enemy's resist are worth having.
+async fn run_draft(
+  client : @lib.Client,
+  model : String,
+  max_ticks : Int,
+) -> Unit {
+  let comps = @game.tournament_comps
+  let n = comps.length()
+  @report.header(
+    "MOBA draft", "Jev ranks the comps from raw stats; set beside the teamfight arena",
+  )
+  // Empirical arena, for the comparison column.
+  let wins = Array::make(n, 0)
+  let losses = Array::make(n, 0)
+  for i in 0..<n {
+    for j in 0..<n {
+      if i == j {
+        continue
+      }
+      let w = arena_fight(comps[i].picks, comps[j].picks, max_ticks)
+      if w == @game.TEAM_A {
+        wins[i] += 1
+        losses[j] += 1
+      } else if w == @game.TEAM_B {
+        wins[j] += 1
+        losses[i] += 1
+      }
+    }
+  }
+  // State: stats and mechanics only. Nothing says which trait is good.
+  let roster_keys = [
+    "classic", "marksman", "mage", "assassin", "bruiser", "tank", "support",
+  ]
+  fn stat_json(key : String) -> Json {
+    let kd = @game.kind_of(key)
+    Json({
+      "champion": Json(key),
+      "deals": Json(kd.dmg_type_name()),
+      "attack": Json(kd.attack),
+      "max_hp": Json(kd.max_hp),
+      "armor": Json(kd.armor),
+      "magic_resist": Json(kd.mr),
+      "frontline": Json(kd.frontline),
+    })
+  }
+
+  let roster = []
+  for k in roster_keys {
+    roster.push(stat_json(k))
+  }
+  let cands = []
+  for c in comps {
+    let picks = []
+    for p in c.picks {
+      picks.push(stat_json(p))
+    }
+    cands.push(Json({ "name": Json(c.name), "picks": Json(picks) }))
+  }
+  let state = Json({
+    "game": Json("Draft a team of three champions for a 3v3 teamfight."),
+    "damage_rule": Json(
+      "Each tick a champion deals its attack to one enemy. Damage dealt = attack * 100 / (100 + resist), where resist is the target's armor when the attacker deals physical and its magic_resist when the attacker deals magic. Armor does nothing against magic; magic_resist does nothing against physical.",
+    ),
+    "frontline_rule": Json(
+      "While a frontline champion is alive with its team, enemy hits aimed at its non-frontline allies land on the frontline champion instead.",
+    ),
+    "win_rule": Json(
+      "A champion at 0 hp is out of the fight. The team left standing wins.",
+    ),
+    "roster": Json(roster),
+    "candidates": Json(cands),
+  })
+  let qs : Map[String, @lib.Question] = Map([])
+  let rubric = [
+    "Loses most 3v3 fights", "About even", "Wins most 3v3 fights", "Dominates almost every fight",
+  ]
+  for c in comps {
+    qs["score_\{c.name}"] = @lib.Question::score(
+      rubric,
+      instructions="Composition '\{c.name}' = \{c.picks.join(" + ")}. In a 3v3 teamfight under the rules and rosters in the state, how does it fare?",
+    )
+  }
+  let names = []
+  for c in comps {
+    names.push(c.name)
+  }
+  qs["draft"] = @lib.Question::choice_of(
+    names,
+    instructions="You are drafting for a 3v3 teamfight. Which of these compositions gives the best chance to win the fight?",
+  )
+  let resp = client.system_one({ state, model, questions: qs, }) catch {
+    e => {
+      println("  draft request failed: \{e}")
+      return
+    }
+  }
+  let jscore = Array::make(n, 0.0)
+  for i in 0..<n {
+    let (v, _) = @report.score_at(resp, "score_\{comps[i].name}")
+    jscore[i] = v
+  }
+  let (pick, pconf) = @report.choice_at(resp, "draft")
+  // Rank by Jev score and by arena wins.
+  let jorder = []
+  let aorder = []
+  for i in 0..<n {
+    jorder.push(i)
+    aorder.push(i)
+  }
+  jorder.sort_by((a, b) => {
+    if jscore[b] > jscore[a] {
+      1
+    } else if jscore[b] < jscore[a] {
+      -1
+    } else {
+      0
+    }
+  })
+  aorder.sort_by((a, b) => wins[b] - wins[a])
+  let jev_rank = Array::make(n, 0)
+  let arena_rank = Array::make(n, 0)
+  for r in 0..<n {
+    jev_rank[jorder[r]] = r + 1
+    arena_rank[aorder[r]] = r + 1
+  }
+  println("  comp          Jev score  Jev#   arena W-L  arena#")
+  for i in 0..<n {
+    let idx = aorder[i]
+    let c = comps[idx]
+    println(
+      "   \{pad(c.name, 12)}  \{pad(@report.d2(jscore[idx]), 9)} \{pad(jev_rank[idx].to_string(), 5)}  \{pad("\{wins[idx]}-\{losses[idx]}", 9)} \{arena_rank[idx]}",
+    )
+  }
+  println("")
+  let arena_best = comps[aorder[0]].name
+  println("  Jev would draft: \{pick} (conf \{@report.d2(pconf)})")
+  println("  arena-strongest: \{arena_best}")
+  if pick == arena_best {
+    println("  → Jev drafted the empirically strongest comp.")
+  } else {
+    println("  → Jev's pick differs from the arena's strongest.")
+  }
+  println(
+    "  \{resp.input_tokens} input tokens (~$\{@report.fixed(resp.input_tokens.to_double() / 1000000.0 * 0.042, 4)})",
+  )
   println("")
 }
 
@@ -476,6 +663,11 @@ async fn main {
         "arena",
         long="arena",
         about="Round-robin the named comps as pure 3v3 teamfights (composition only). Needs no API key.",
+      ),
+      @argparse.FlagArg(
+        "draft",
+        long="draft",
+        about="Ask Jev to rank the comps from the raw archetype stats, vs the empirical arena.",
       ),
     ],
     options=[
@@ -562,6 +754,7 @@ async fn main {
     verbose: matches.flags.get("verbose").unwrap_or(false),
     tournament: matches.flags.get("tournament").unwrap_or(false),
     arena: matches.flags.get("arena").unwrap_or(false),
+    draft: matches.flags.get("draft").unwrap_or(false),
     replay: opt_value(matches, "replay").unwrap_or(""),
   }
   // The tournament and arena are scripted-only, so they need neither a valid
@@ -577,7 +770,7 @@ async fn main {
     }
   }
   let needs_api = !offline &&
-    (opts.team_a == "jev" || opts.team_b == "jev")
+    (opts.draft || opts.team_a == "jev" || opts.team_b == "jev")
   if needs_api && api_key.is_empty() {
     @stdio.stderr.write(
       "moba: no API key; set TYPESAFEAI_API_KEY or pass --api-key\n",
@@ -618,6 +811,10 @@ async fn run(opts : Opts) -> Unit {
     @lib.Client::new(opts.api_key)
   } else {
     @lib.Client::with_base_url(opts.api_key, opts.base_url)
+  }
+  if opts.draft {
+    run_draft(client, opts.model, opts.max_ticks)
+    return
   }
   let stats = Stats::new()
   @report.header(
@@ -674,13 +871,17 @@ async fn run(opts : Opts) -> Unit {
       "  illegal picks: \{stats.illegal} (the choices ARE the legal moves)",
     )
     if stats.fallback_ticks > 0 {
-      println("  scripted fallback ticks after API failures: \{stats.fallback_ticks}")
+      println(
+        "  scripted fallback ticks after API failures: \{stats.fallback_ticks}",
+      )
     }
   }
   if opts.replay != "" && last_replay.length() > 0 {
     @fs.write_file(opts.replay, last_replay.join("\n") + "\n")
     println("  replay of the last game written to \{opts.replay}")
-    println("  play it back:  moon run --target native cmd/moba_replay -- --file \{opts.replay}")
+    println(
+      "  play it back:  moon run --target native cmd/moba_replay -- --file \{opts.replay}",
+    )
   }
   println("")
 }

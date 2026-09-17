@@ -45,8 +45,8 @@ test "a dying champion still deals its blow" {
 /// the lever that makes a mono-damage team exploitable.
 test "armor mitigates physical, not magic" {
   let ad = Game::with_comps(["marksman", "classic", "classic"], [
-    "classic", "classic", "classic",
-  ]).champs[0]
+      "classic", "classic", "classic",
+    ]).champs[0]
   // classic attacker (attack 10, physical): 10 raw, 10*100/155 = 6 vs armor 55.
   let classic = Game::new().champs[0]
   assert_eq(classic.damage_to(0, 0), 10)
@@ -63,8 +63,8 @@ test "armor mitigates physical, not magic" {
 /// a team stacking only armor is still soft to an AP threat.
 test "magic mitigated by resist, not armor" {
   let mage = Game::with_comps(["mage", "classic", "classic"], [
-    "classic", "classic", "classic",
-  ]).champs[0]
+      "classic", "classic", "classic",
+    ]).champs[0]
   // mage: attack 14, magic. 14 raw; 14*100/145 = 9 vs mr 45; armor is ignored.
   assert_eq(mage.damage_to(0, 0), 14)
   assert_eq(mage.damage_to(0, 45), 9)

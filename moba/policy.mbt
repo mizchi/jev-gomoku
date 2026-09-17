@@ -20,10 +20,7 @@ pub struct Memory {
 
 ///|
 pub fn Memory::new() -> Memory {
-  {
-    last_seen_node: Array::make(6, -1),
-    last_seen_tick: Array::make(6, -1),
-  }
+  { last_seen_node: Array::make(6, -1), last_seen_tick: Array::make(6, -1), }
 }
 
 ///|
@@ -98,7 +95,8 @@ pub fn scripted_action(g : Game, c : Champ) -> Action {
     // An earlier version backed off on an even matchup, which turned every
     // game into a lane standoff where no structure was ever touched.
     let outnumber = here_allies.length() >= here_enemies.length()
-    let healthier = c.hp * here_enemies[0].max_hp >= here_enemies[0].hp * c.max_hp
+    let healthier = c.hp * here_enemies[0].max_hp >=
+      here_enemies[0].hp * c.max_hp
     if outnumber || healthier || c.hp * 100 > c.max_hp * 55 {
       return AttackChamp(softest().id)
     }
@@ -154,7 +152,13 @@ pub fn Game::observation(self : Game, team : Int, mem : Memory) -> Json {
           "name": Json(c.name),
           "lane": Json(c.role),
           "kind": Json(c.kind),
-          "deals": Json(if c.dmg_type == DMG_PHYSICAL { "physical" } else { "magic" }),
+          "deals": Json(
+            if c.dmg_type == DMG_PHYSICAL {
+              "physical"
+            } else {
+              "magic"
+            },
+          ),
           "frontline": Json(c.frontline),
           "hp": Json(c.hp),
           "max_hp": Json(c.max_hp),
@@ -189,7 +193,13 @@ pub fn Game::observation(self : Game, team : Int, mem : Memory) -> Json {
         "id": Json(e.id),
         "name": Json(e.name),
         "kind": Json(e.kind),
-        "deals": Json(if e.dmg_type == DMG_PHYSICAL { "physical" } else { "magic" }),
+        "deals": Json(
+          if e.dmg_type == DMG_PHYSICAL {
+            "physical"
+          } else {
+            "magic"
+          },
+        ),
         "frontline": Json(e.frontline),
         "hp": Json(e.hp),
         "armor": Json(e.armor),

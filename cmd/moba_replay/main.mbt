@@ -249,9 +249,17 @@ fn hp_bar(hp : Int, max : Int) -> String {
 /// champions standing on it. Plain text so column widths stay exact.
 fn render_board(m : Meta, f : Frame) -> String {
   let cells = [
-    (0, 1, "a_top"), (0, 2, "m_top"), (0, 3, "b_top"), (1, 0, "a_base"),
-    (1, 1, "a_jg"), (1, 2, "m_jg"), (1, 3, "b_jg"), (1, 4, "b_base"),
-    (2, 1, "a_bot"), (2, 2, "m_bot"), (2, 3, "b_bot"),
+    (0, 1, "a_top"),
+    (0, 2, "m_top"),
+    (0, 3, "b_top"),
+    (1, 0, "a_base"),
+    (1, 1, "a_jg"),
+    (1, 2, "m_jg"),
+    (1, 3, "b_jg"),
+    (1, 4, "b_base"),
+    (2, 1, "a_bot"),
+    (2, 2, "m_bot"),
+    (2, 3, "b_bot"),
   ]
   let w = 15
   fn name_at(r : Int, c : Int) -> String {
@@ -377,7 +385,7 @@ struct Opts {
 }
 
 ///|
-async fn play(opts : Opts) -> Unit raise {
+async fn play(opts : Opts) -> Unit {
   let text = @fs.read_file(opts.file).text()
   let mut meta : Meta? = None
   let frames = []
@@ -433,7 +441,11 @@ async fn main {
     "moba_replay",
     about="Replay a recorded MOBA game in the terminal.",
     flags=[
-      @argparse.FlagArg("auto", long="auto", about="Auto-advance instead of waiting for Enter."),
+      @argparse.FlagArg(
+        "auto",
+        long="auto",
+        about="Auto-advance instead of waiting for Enter.",
+      ),
       @argparse.FlagArg(
         "no-clear",
         long="no-clear",
@@ -441,7 +453,11 @@ async fn main {
       ),
     ],
     options=[
-      @argparse.OptionArg("file", long="file", about="Replay file (JSON lines)."),
+      @argparse.OptionArg(
+        "file",
+        long="file",
+        about="Replay file (JSON lines).",
+      ),
       @argparse.OptionArg(
         "ms",
         long="ms",
@@ -497,7 +513,10 @@ fn opt(matches : @argparse.Matches, key : String) -> String? {
 ///|
 fn int_opt(matches : @argparse.Matches, key : String, dflt : Int) -> Int {
   match matches.values.get(key) {
-    Some(arr) if arr.length() > 0 => @string.from_str(arr[0]) catch { _ => dflt }
+    Some(arr) if arr.length() > 0 =>
+      @string.from_str(arr[0]) catch {
+        _ => dflt
+      }
     _ => dflt
   }
 }
