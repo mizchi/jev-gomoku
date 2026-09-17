@@ -186,17 +186,25 @@ export function buckets(rows: ChessRow[], edges = [0.2, 0.4, 0.6, 0.8]) {
  */
 export function sweep(rows: ChessRow[]) {
   const thresholds = [0, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.01];
+  const totalAll = rows.reduce((a, r) => a + r.loss, 0);
   return thresholds.map((t) => {
     const escalated = rows.filter((r) => r.confidence < t);
     const kept = rows.filter((r) => r.confidence >= t);
     const totalLoss = kept.reduce((a, r) => a + r.loss, 0);
     const searchMs = escalated.reduce((a, r) => a + r.searchMs, 0);
     const jevMs = rows.reduce((a, r) => a + r.jevMs, 0);
+    const rate = escalated.length / rows.length;
+    // The control the whole claim rests on. Escalating ANY subset of this
+    // size removes some loss, so the gate is only worth something if it
+    // beats picking that many positions at random — where the expected
+    // remaining loss is just (1 - rate) of the total.
+    const randomMeanLoss = (totalAll * (1 - rate)) / rows.length;
     return {
       threshold: t,
       escalated: escalated.length,
-      rate: escalated.length / rows.length,
+      rate,
       meanLoss: totalLoss / rows.length,
+      randomMeanLoss,
       badMoves: kept.filter((r) => r.loss >= 100).length,
       meanMs: (jevMs + searchMs) / rows.length,
     };

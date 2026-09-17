@@ -65,13 +65,13 @@ for (const b of buckets(rows, edges)) {
 }
 console.log("");
 
-console.log("| gate | escalated | mean cp loss | bad moves left | ms/decision |");
-console.log("| --- | --- | --- | --- | --- |");
+console.log("| gate | escalated | mean cp loss | same budget, random | bad moves left | ms/decision |");
+console.log("| --- | --- | --- | --- | --- | --- |");
 for (const s of sweep(rows)) {
   const label = s.threshold > 1 ? "always" : s.threshold.toFixed(2);
   console.log(
     `| ${label} | ${s.escalated}/${rows.length} (${(s.rate * 100).toFixed(0)}%) | ` +
-      `${s.meanLoss.toFixed(0)} | ${s.badMoves} | ${s.meanMs.toFixed(0)} |`,
+      `**${s.meanLoss.toFixed(0)}** | ${s.randomMeanLoss.toFixed(0)} | ${s.badMoves} | ${s.meanMs.toFixed(0)} |`,
   );
 }
 console.log("");
