@@ -30,6 +30,8 @@ function arg(name: string, fallback: string): string {
 const AGENT_MODEL = arg("agent-model", "claude-haiku-4-5-20251001");
 const ARMS = arg("arms", "agent,suggestion,oracle").split(",");
 const LIMIT = Number.parseInt(arg("limit", "1000"), 10);
+/** Cases in flight at once; every arm is a network round trip. */
+const CONCURRENCY = Number.parseInt(arg("concurrency", "5"), 10);
 const RESULTS = "out/results.json";
 
 interface Row {
@@ -153,14 +155,16 @@ async function main() {
   const rows: Row[] = dataset.map((c) => prior.get(c.request) ?? { request: c.request, expect: c.expect });
   const jev = ARMS.includes("suggestion") ? new Jev() : (null as unknown as Jev);
 
-  for (let i = 0; i < rows.length; i += 1) {
-    const r = rows[i];
+  const cached = rows.filter((r) => r.agent !== undefined).length;
+  if (cached > 0) console.log(`  ${cached} of ${rows.length} cases already cached`);
+
+  /** Everything one case needs, so cases can be run side by side. */
+  async function processCase(r: Row, index: number): Promise<void> {
     if (ARMS.includes("agent") && r.agent === undefined) {
       const d = await decide(roster, r.request, AGENT_MODEL);
       r.agent = d.loaded;
       r.agentMs = d.ms;
       r.agentInvalid = d.invalid;
-      save(rows);
     }
     if (ARMS.includes("suggestion") && r.assisted === undefined) {
       if (r.suggested === undefined) {
@@ -169,7 +173,7 @@ async function main() {
           r.suggested = s.names[0] ?? null;
           r.suggestedTrace = s.trace;
         } catch (err) {
-          console.warn(`\n  suggest failed on case ${i}: ${String(err).slice(0, 140)}`);
+          console.warn(`\n  suggest failed on case ${index}: ${String(err).slice(0, 140)}`);
         }
       }
       if (r.suggested !== undefined) {
@@ -177,15 +181,32 @@ async function main() {
         r.assisted = d.loaded;
         r.assistedMs = d.ms;
       }
-      save(rows);
     }
     if (ARMS.includes("oracle") && r.oracle === undefined) {
       const d = await decide(roster, r.request, AGENT_MODEL, suggestionBlock(r.expect ? [r.expect] : []));
       r.oracle = d.loaded;
-      save(rows);
     }
     process.stdout.write(".");
   }
+
+  // A plain worker pool. Every arm is a network round trip, so doing the cases
+  // one after another left the machine idle for most of an hour. Saving after
+  // each case is safe: JS runs one writer at a time.
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = next;
+      next += 1;
+      if (i >= rows.length) return;
+      try {
+        await processCase(rows[i], i);
+      } catch (err) {
+        console.warn(`\n  case ${i} failed: ${String(err).slice(0, 140)}`);
+      }
+      save(rows);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, rows.length) }, worker));
   console.log("");
   report(rows);
   if (jev) {
