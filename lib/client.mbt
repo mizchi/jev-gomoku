@@ -56,6 +56,7 @@ pub async fn Client::system_one(
   self : Client,
   req : SystemOneRequest,
 ) -> SystemOneResponse {
+  req.validate()
   let (resp, body) = @http.post(
     "\{self.base_url}/v1/systemone",
     req.to_json(),
