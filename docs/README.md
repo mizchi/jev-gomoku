@@ -57,6 +57,8 @@ MoonBit 側(`lib/` `report/` `moba/` `cmd/*`)と TypeScript 側(`experiments/*`)
 | driver の候補一覧をステップ毎に作り直さない | SPA では 2 手目以降が古い候補から選ぶ([05](05-browser-chaos.md#4-chaosbringer-側への指摘-driver-の候補一覧が-1-ページ-1-回しか作られない)) |
 | ゲートの noul を他のロスターからそのまま移す | 「スキルとは何か」の定義が埋まっている。純損失になりうる([08](08-skill-suggestion.md#43-cookbook-のゲートは-このロスターでは純損失だった)) |
 | 複数の noul を平均してゲートにする | 信号を持つ 1 問が薄まる。単独のほうが強いことがある([08](08-skill-suggestion.md#43-cookbook-のゲートは-このロスターでは純損失だった)) |
+| 閾値の境界に乗った決定をそのまま採る | 些細な入力差で pass/block が入れ替わる。境界帯は人間へ([09](09-guardrails.md#3-cookbook-の-15-ケースの再現)) |
+| 1 リクエストの screen で全部塞げると思う | エンコードで抜ける・聞いてないハザードに穴([09](09-guardrails.md#外した-2-件--どちらも1-リクエストで-screen-の構造的限界)) |
 | confidence の相関だけ見て二層構成を組む | 第二段が弱い・分布が潰れている場合に破綻する([07](07-escalation.md#結論先に)) |
 | エスカレーションをランダム同予算と比べない | どう選んでも品質は上がるので、効いた証明にならない([07](07-escalation.md#4-q2--コスト品質曲線)) |
 
@@ -73,6 +75,7 @@ MoonBit 側(`lib/` `report/` `moba/` `cmd/*`)と TypeScript 側(`experiments/*`)
 | [06](06-ideas.md) | 次に効きそうなことの提案(優先順位つき) | 📝 |
 | [07](07-escalation.md) | confidence でエスカレーションする二層構成(提案 A の検証) | ✅ |
 | [08](08-skill-suggestion.md) | [skill suggestion cookbook](https://docs.typesafe.ai/cookbooks/skill_suggestion) の追試(mizchi/skills 68 スキル) | ✅ |
+| [09](09-guardrails.md) | [LLM guardrails cookbook](https://docs.typesafe.ai/cookbooks/llm_guardrails) の追試(入出力スクリーニング) | ✅ |
 
 ## この探索から見えている一般則
 
