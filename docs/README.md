@@ -42,6 +42,7 @@ MoonBit 側(`lib/` `report/` `moba/` `cmd/*`)と TypeScript 側(`experiments/*`)
 | **質問はエージェント、閾値はデータ** | 閾値を合わせ直すと 10〜22 → 21〜22 に収束 | 本リポジトリ | [04](04-agent-built-prompts.md#2-原因は設計ではなく閾値だった) |
 | **提案は「決定」ではなく「助言」として渡す** | 提案単独 10.3% → agent が見て決めて 5.9% | [cookbook](https://docs.typesafe.ai/cookbooks/skill_suggestion) | [08](08-skill-suggestion.md#42-提案は決定ではなく助言として効いている) |
 | **state に stat を渡せば「選ぶ」問題も解ける** | 素の数値から編成をドラフト。Jev 順位 ≈ 実測、最強を conf 0.76 で | 本リポジトリ | [11](11-synergy.md#5-jev-は編成を選べるか--ドラフト) |
+| **上流の小さなミスは下流の正しい判断で買い戻せる** | 弱いドラフト+Jev が 強いドラフト+scripted に 5-1。ただし相手も上手いと戻る | 本リポジトリ | [12](12-comeback.md) |
 
 > 一番効いたのは合成ロジックではなく**答えの形**でした。コード側の閾値をどう捏ねても
 > 14/24 のままだったものが、`choice` → `score` の一手で 19 → 23 になっています。
@@ -66,6 +67,8 @@ MoonBit 側(`lib/` `report/` `moba/` `cmd/*`)と TypeScript 側(`experiments/*`)
 | エスカレーションをランダム同予算と比べない | どう選んでも品質は上がるので、効いた証明にならない([07](07-escalation.md#4-q2--コスト品質曲線)) |
 | シナジーの機構を実装せず編成だけ変える | ピールや耐性が効かないと前衛はただの的で raw DPS が勝つ。効果は機構を入れて初めて測れる([11](11-synergy.md#2-チャンピオンに多様性を持たせる)) |
 | リトライ無しのクライアントで API を叩きすぎる | レート制限で全 hold、対称ゲームが 350-350 で膠着する([11](11-synergy.md#1-相互キルの同時処理)) |
+| ドラフトの良し悪しを 1 つの policy だけで判定する | scripted に弱い編成が Jev には強い。順位は policy 依存([12](12-comeback.md)) |
+| 「取り返せた」を万能と読む | 相手も上手いと編成差は戻る。アクションは戦略の赤字を買い戻すが戦略を良くはしない([12](12-comeback.md)) |
 
 ## レポート
 
@@ -83,6 +86,7 @@ MoonBit 側(`lib/` `report/` `moba/` `cmd/*`)と TypeScript 側(`experiments/*`)
 | [09](09-guardrails.md) | [LLM guardrails cookbook](https://docs.typesafe.ai/cookbooks/llm_guardrails) の追試(入出力スクリーニング) | ✅ |
 | [10](10-jev-vs-jev.md) | Jev vs Jev を独立プロセスで対戦(referee + player ×2) | ✅ |
 | [11](11-synergy.md) | チャンピオンのシナジー(AD/AP・前衛)、相互キルの同時処理、TUI リプレイ | ✅ |
+| [12](12-comeback.md) | 間違ったドラフトを正しいアクション(Jev)で取り返せるか | ✅ |
 
 ## この探索から見えている一般則
 
