@@ -45,12 +45,23 @@ async function runChess() {
   console.log("  Q0  is tier 2 actually stronger than tier 1? (head to head, no shared yardstick)");
   for (const line of await headToHead(jev, { plies: PLIES, depth: DEPTH })) console.log(line);
   console.log("");
+  const { writeFileSync, mkdirSync, existsSync, readFileSync } = await import("node:fs");
+  mkdirSync("out", { recursive: true });
+  const CACHE = "out/chess-positions.json";
+  // Resume from whatever a previous run managed to save.
+  const seed: chess.ChessRow[] =
+    process.argv.includes("--resume") && existsSync(CACHE)
+      ? (JSON.parse(readFileSync(CACHE, "utf8")) as chess.ChessRow[])
+      : [];
+  if (seed.length > 0) console.log(`  resuming with ${seed.length} positions already collected`);
   process.stdout.write("  collecting positions ");
   const rows = await chess.collect(jev, {
     games: GAMES,
     plies: PLIES,
     depth: DEPTH,
+    seed,
     onRow: () => process.stdout.write("."),
+    checkpoint: (r) => writeFileSync(CACHE, JSON.stringify(r, null, 2)),
   });
   console.log(` ${rows.length} positions`);
 
@@ -95,11 +106,9 @@ async function runChess() {
       `search ${(rows.reduce((a, r) => a + r.searchMs, 0) / rows.length).toFixed(0)} ms/position and free.`,
   );
   console.log("");
-  // Machine-readable, so the curve can be re-plotted without re-running.
-  const { writeFileSync, mkdirSync } = await import("node:fs");
-  mkdirSync("out", { recursive: true });
-  writeFileSync("out/chess-positions.json", JSON.stringify(rows, null, 2));
-  console.log("  per-position data written to out/chess-positions.json");
+  writeFileSync(CACHE, JSON.stringify(rows, null, 2));
+  console.log(`  per-position data written to ${CACHE}`);
+  if (jev.retriedCalls > 0) console.log(`  (${jev.retriedCalls} Jev calls needed a retry)`);
   console.log("");
 }
 

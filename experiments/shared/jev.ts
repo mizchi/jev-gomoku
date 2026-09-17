@@ -41,6 +41,8 @@ export interface JevOptions {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+  /** Retries for 429/5xx and network errors. Default 5. */
+  retries?: number;
 }
 
 export class Jev {
@@ -52,6 +54,9 @@ export class Jev {
   outputTokens = 0;
   calls = 0;
   totalMs = 0;
+  /** Calls that needed at least one retry, so a run can report the weather. */
+  retriedCalls = 0;
+  readonly retries: number;
 
   constructor(opts: JevOptions = {}) {
     const key = opts.apiKey ?? process.env.TYPESAFEAI_API_KEY ?? "";
@@ -59,6 +64,7 @@ export class Jev {
     this.#apiKey = key;
     this.#baseUrl = opts.baseUrl ?? "https://api.typesafe.ai";
     this.model = opts.model ?? "jev-latest";
+    this.retries = opts.retries ?? 5;
   }
 
   async ask(
@@ -80,22 +86,53 @@ export class Jev {
       }
     }
     const started = Date.now();
-    const res = await fetch(`${this.#baseUrl}/v1/systemone`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${this.#apiKey}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ model: this.model, state, questions }),
-    });
-    const text = await res.text();
-    if (!res.ok) throw new JevError(`HTTP ${res.status}: ${text.slice(0, 300)}`);
-    const body = JSON.parse(text) as SystemOneResponse;
-    this.calls += 1;
-    this.totalMs += Date.now() - started;
-    this.inputTokens += body.usage.input_tokens;
-    this.outputTokens += body.usage.output_tokens;
-    return body;
+    const body = JSON.stringify({ model: this.model, state, questions });
+    // Retry the transient statuses. A long collection run WILL meet a 529
+    // eventually, and losing an hour of positions to one overloaded response
+    // is not a result about anything.
+    let lastError = "";
+    for (let attempt = 0; attempt <= this.retries; attempt += 1) {
+      let res: Response;
+      try {
+        res = await fetch(`${this.#baseUrl}/v1/systemone`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${this.#apiKey}`,
+            "content-type": "application/json",
+          },
+          body,
+        });
+      } catch (err) {
+        lastError = `network: ${String(err).slice(0, 200)}`;
+        await this.#backoff(attempt);
+        continue;
+      }
+      const text = await res.text();
+      if (res.ok) {
+        const parsed = JSON.parse(text) as SystemOneResponse;
+        this.calls += 1;
+        this.totalMs += Date.now() - started;
+        this.inputTokens += parsed.usage.input_tokens;
+        this.outputTokens += parsed.usage.output_tokens;
+        return parsed;
+      }
+      lastError = `HTTP ${res.status}: ${text.slice(0, 300)}`;
+      // 4xx other than rate limiting is our bug; retrying it just wastes time.
+      const transient = res.status === 429 || res.status >= 500;
+      if (!transient || attempt === this.retries) break;
+      this.retriedCalls += 1;
+      await this.#backoff(attempt, res.headers.get("retry-after"));
+    }
+    throw new JevError(lastError);
+  }
+
+  /** Exponential backoff with jitter, honouring Retry-After when present. */
+  async #backoff(attempt: number, retryAfter?: string | null): Promise<void> {
+    const hinted = retryAfter ? Number.parseFloat(retryAfter) * 1000 : NaN;
+    const wait = Number.isFinite(hinted)
+      ? hinted
+      : Math.min(30_000, 1000 * 2 ** attempt) * (0.5 + Math.random());
+    await new Promise((r) => setTimeout(r, wait));
   }
 }
 

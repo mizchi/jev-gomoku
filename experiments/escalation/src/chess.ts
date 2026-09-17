@@ -104,9 +104,20 @@ async function jevMove(
  */
 export async function collect(
   jev: Jev,
-  opts: { games: number; plies: number; depth: number; onRow?: (r: ChessRow) => void },
+  opts: {
+    games: number;
+    plies: number;
+    depth: number;
+    onRow?: (r: ChessRow) => void;
+    /** Called after every row so a crash keeps the positions already paid for. */
+    checkpoint?: (rows: ChessRow[]) => void;
+    /** Resume: positions already collected, kept and extended. */
+    seed?: ChessRow[];
+  },
 ): Promise<ChessRow[]> {
-  const rows: ChessRow[] = [];
+  const rows: ChessRow[] = [...(opts.seed ?? [])];
+  // Each position costs a Jev call and a full search, so a transient API
+  // failure two thirds of the way through must not throw the lot away.
   for (let g = 0; g < opts.games; g += 1) {
     const board = new Chess();
     // A different opening move per game, so the positions are not all the
@@ -114,7 +125,15 @@ export async function collect(
     const openings = ["e2e4", "d2d4", "g1f3", "c2c4"];
     if (g > 0) board.move(openings[g % openings.length]);
     while (!board.isGameOver() && board.history().length < opts.plies) {
-      const jm = await jevMove(jev, board);
+      let jm: { uci: string; confidence: number; ms: number };
+      try {
+        jm = await jevMove(jev, board);
+      } catch (err) {
+        // The client already retried. Give up on this game, keep the rest.
+        opts.onRow?.({ ...rows[rows.length - 1], jevMove: "ABORTED" } as ChessRow);
+        console.warn(`\n  game ${g + 1} stopped at ply ${board.history().length}: ${String(err).slice(0, 120)}`);
+        break;
+      }
       // One search per position gives both the best move and Jev's loss.
       const an = analyse(board, jm.uci, opts.depth);
       const row: ChessRow = {
@@ -130,6 +149,7 @@ export async function collect(
       };
       rows.push(row);
       opts.onRow?.(row);
+      opts.checkpoint?.(rows);
       board.move(jm.uci);
     }
   }
