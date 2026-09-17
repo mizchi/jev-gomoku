@@ -17,6 +17,8 @@
 | **逃げ道の選択肢 / スコープ gate** | 範囲外入力の「自信のある誤答」を塞ぐ | 本リポジトリ | [00](00-api-notes.md#closed-world) |
 | **選択肢名だけの choice** | 説明文のトークンを払わずに広いメニュー(20 択で 441 tok) | [schema](https://api.typesafe.ai/openapi.json) | [00](00-api-notes.md#name-only) |
 | **原子質問 + コード側合成** | 監査ログには効く。正解率への上乗せは限定的 | [docs](https://docs.typesafe.ai/patterns) | [01](01-shell-risk.md#4-分解は万能ではない) |
+| **繰り返させたくない選択はコードで消す** | 言葉で禁止するより安く確実 | 本リポジトリ | [05](05-browser-chaos.md#変化-2--3-選択肢から消すほうが言葉で言うより効く) |
+| **幅はランダム、深さは Jev** | 置き換えではなく併用。8 手深いゴール到達 0/3 → 3/3 | 本リポジトリ | [05](05-browser-chaos.md#1-結果) |
 
 > 一番効いたのは合成ロジックではなく**答えの形**でした。コード側の閾値をどう捏ねても
 > 14/24 のままだったものが、`choice` → `score` の一手で 19 → 23 になっています。
@@ -40,7 +42,7 @@
 | [02](02-moba.md) | ヘッドレス 3v3 MOBA(2 レーン + ジャングル、視界と戦場の霧) | 🚧 |
 | [03](03-chess.md) | チェス、Jev vs Claude Sonnet 5 | 🚧 |
 | [04](04-agent-built-prompts.md) | コーディングエージェントに質問を組ませて動的にパイプラインを作る | 🚧 |
-| [05](05-browser-chaos.md) | [chaosbringer](https://github.com/mizchi/chaosbringer) の次操作選択を Jev に置き換える | 🚧 |
+| [05](05-browser-chaos.md) | [chaosbringer](https://github.com/mizchi/chaosbringer) の次操作選択を Jev に置き換える | ✅ |
 
 ## この探索から見えている一般則
 
