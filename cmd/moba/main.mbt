@@ -16,9 +16,19 @@ struct Opts {
   model : String
   team_a : String
   team_b : String
+  /// Archetype per lane for each side (top/jungle/bot); empty means classic×3.
+  comp_a : Array[String]
+  comp_b : Array[String]
   games : Int
   max_ticks : Int
   verbose : Bool
+  /// Round-robin the named comps against each other, scripted, and print a
+  /// win table. Ignores --a/--b/--games.
+  tournament : Bool
+  /// Round-robin the named comps as pure teamfights (composition only).
+  arena : Bool
+  /// If non-empty, write the last game's replay to this file as JSON lines.
+  replay : String
 }
 
 ///|
@@ -172,6 +182,8 @@ struct GameResult {
   ticks : Int
   a_structure_hp : Int
   b_structure_hp : Int
+  /// The game as JSON lines (meta, frames, result), for the replay player.
+  replay : Array[String]
 }
 
 ///|
@@ -181,9 +193,13 @@ async fn play_game(
   stats : Stats,
   index : Int,
 ) -> GameResult {
-  let g = @game.Game::new()
+  let g = @game.Game::with_comps(opts.comp_a, opts.comp_b)
   let mem_a = @game.Memory::new()
   let mem_b = @game.Memory::new()
+  let replay = [
+    g.replay_meta(opts.team_a, opts.team_b, opts.comp_a, opts.comp_b, opts.max_ticks).stringify(),
+    g.replay_frame().stringify(), // tick 0, the opening state
+  ]
   if opts.verbose {
     println("")
     println("--- game \{index + 1}: A=\{opts.team_a} vs B=\{opts.team_b} ---")
@@ -216,6 +232,7 @@ async fn play_game(
       }
     }
     g.step(actions)
+    replay.push(g.replay_frame().stringify())
     if opts.verbose && g.log.length() > 0 {
       let last = g.log[g.log.length() - 1]
       if last.has_prefix("t\{g.tick}:") {
@@ -238,7 +255,203 @@ async fn play_game(
   } else {
     0
   }
-  { winner, ticks: g.tick, a_structure_hp: a_hp, b_structure_hp: b_hp }
+  replay.push(g.replay_result(winner).stringify())
+  { winner, ticks: g.tick, a_structure_hp: a_hp, b_structure_hp: b_hp, replay }
+}
+
+///|
+/// A scripted-only game with the given comps, run to completion. No client, no
+/// API — this is the free path the tournament uses to measure composition
+/// against composition with the policy held fixed.
+fn play_scripted(comp_a : Array[String], comp_b : Array[String], max_ticks : Int) -> Int {
+  let g = @game.Game::with_comps(comp_a, comp_b)
+  while g.winner == 0 && g.tick < max_ticks {
+    let actions : Map[Int, @game.Action] = Map([])
+    for c in g.champs {
+      if c.alive() {
+        actions[c.id] = @game.scripted_action(g, c)
+      }
+    }
+    g.step(actions)
+  }
+  let a_hp = g.structure_hp(@game.TEAM_A)
+  let b_hp = g.structure_hp(@game.TEAM_B)
+  if g.winner != 0 {
+    g.winner
+  } else if b_hp < a_hp {
+    @game.TEAM_A
+  } else if a_hp < b_hp {
+    @game.TEAM_B
+  } else {
+    0
+  }
+}
+
+///|
+/// A pure 3v3 teamfight: both comps stacked on one node, everyone focus-fires
+/// the softest enemy (so the frontline guard is in play) and nobody retreats.
+/// This isolates composition from map macro — no lanes, no farming, no towers,
+/// just "which five-stat team wins the fight". Returns the winning team, or 0
+/// if neither side is wiped inside the cap.
+fn arena_fight(comp_a : Array[String], comp_b : Array[String], max_ticks : Int) -> Int {
+  let g = @game.Game::with_comps(comp_a, comp_b)
+  let arena = 9 // m_jg: central, no tower, no base heal
+  g.place_all(arena)
+  let mut result = 0
+  for _t in 0..<max_ticks {
+    let a_in = g.champs_at(arena, @game.TEAM_A).length()
+    let b_in = g.champs_at(arena, @game.TEAM_B).length()
+    if a_in == 0 && b_in == 0 {
+      result = 0
+      break
+    }
+    if b_in == 0 {
+      result = @game.TEAM_A
+      break
+    }
+    if a_in == 0 {
+      result = @game.TEAM_B
+      break
+    }
+    let actions : Map[Int, @game.Action] = Map([])
+    for c in g.champs {
+      if !c.alive() || c.node != arena {
+        continue
+      }
+      let enemy = if c.team == @game.TEAM_A { @game.TEAM_B } else { @game.TEAM_A }
+      let foes = g.champs_at(arena, enemy)
+      if foes.is_empty() {
+        continue
+      }
+      let mut soft = foes[0]
+      for f in foes {
+        if f.hp < soft.hp {
+          soft = f
+        }
+      }
+      actions[c.id] = AttackChamp(soft.id)
+    }
+    g.step(actions)
+  }
+  result
+}
+
+///|
+/// The arena round-robin: every comp vs every other in a pure teamfight, both
+/// sides. This is the clean answer to "does correct synergy win a fight?" —
+/// composition is the only variable, the policy is identical.
+fn run_arena(max_ticks : Int) -> Unit {
+  let comps = @game.tournament_comps
+  let n = comps.length()
+  @report.header(
+    "MOBA synergy — teamfight arena",
+    "3v3 to the death on one node, focus fire + peel, composition is the only variable",
+  )
+  let wins = Array::make(n, 0)
+  let losses = Array::make(n, 0)
+  let draws = Array::make(n, 0)
+  let mut games = 0
+  for i in 0..<n {
+    for j in 0..<n {
+      if i == j {
+        continue
+      }
+      let w = arena_fight(comps[i].picks, comps[j].picks, max_ticks)
+      games += 1
+      if w == @game.TEAM_A {
+        wins[i] += 1
+        losses[j] += 1
+      } else if w == @game.TEAM_B {
+        wins[j] += 1
+        losses[i] += 1
+      } else {
+        draws[i] += 1
+        draws[j] += 1
+      }
+    }
+  }
+  println("  \{games} teamfights over \{n} comps\n")
+  let order = []
+  for i in 0..<n {
+    order.push(i)
+  }
+  order.sort_by((a, b) => wins[b] - wins[a])
+  println("  rank  comp          frontline  damage   W-L-D    picks")
+  let mut rank = 1
+  for idx in order {
+    let c = comps[idx]
+    let fl = if c.has_frontline() { "yes" } else { "no " }
+    let dm = if c.mixed_damage() { "AD+AP" } else { "mono " }
+    let wld = "\{wins[idx]}-\{losses[idx]}-\{draws[idx]}"
+    println("   \{rank}    \{pad(c.name, 12)}  \{fl}        \{dm}    \{pad(wld, 7)}  \{c.picks.join(", ")}")
+    rank += 1
+  }
+  println("")
+}
+
+///|
+/// Round-robin every named comp against every other, scripted, on both sides
+/// (so side has no say), and print a win table. The question this answers:
+/// does the "correct synergy" (a durable frontline and both damage types)
+/// actually win, with the policy identical on both sides?
+fn run_tournament(max_ticks : Int) -> Unit {
+  let comps = @game.tournament_comps
+  let n = comps.length()
+  @report.header("MOBA synergy tournament", "scripted vs scripted, each ordered pair once")
+  // wins[i] = games comp i won; also track draws so nothing is hidden.
+  let wins = Array::make(n, 0)
+  let losses = Array::make(n, 0)
+  let draws = Array::make(n, 0)
+  let mut games = 0
+  for i in 0..<n {
+    for j in 0..<n {
+      if i == j {
+        continue
+      }
+      let w = play_scripted(comps[i].picks, comps[j].picks, max_ticks)
+      games += 1
+      if w == @game.TEAM_A {
+        wins[i] += 1
+        losses[j] += 1
+      } else if w == @game.TEAM_B {
+        wins[j] += 1
+        losses[i] += 1
+      } else {
+        draws[i] += 1
+        draws[j] += 1
+      }
+    }
+  }
+  println("  \{games} games over \{n} comps\n")
+  // Print sorted by wins, descending. Simple selection sort on an index array.
+  let order = []
+  for i in 0..<n {
+    order.push(i)
+  }
+  order.sort_by((a, b) => wins[b] - wins[a])
+  println("  rank  comp          frontline  damage   W-L-D   picks")
+  let mut rank = 1
+  for idx in order {
+    let c = comps[idx]
+    let fl = if c.has_frontline() { "yes" } else { "no " }
+    let dm = if c.mixed_damage() { "AD+AP" } else { "mono " }
+    let wld = "\{wins[idx]}-\{losses[idx]}-\{draws[idx]}"
+    let name = pad(c.name, 12)
+    let picks = c.picks.join(", ")
+    println("   \{rank}    \{name}  \{fl}        \{dm}    \{pad(wld, 7)} \{picks}")
+    rank += 1
+  }
+  println("")
+}
+
+///|
+/// Left-justify `s` to at least `width` with spaces, for column alignment.
+fn pad(s : String, width : Int) -> String {
+  let mut out = s
+  while out.length() < width {
+    out = out + " "
+  }
+  out
 }
 
 // ----------------------------------------------------------------- plumbing
@@ -253,6 +466,16 @@ async fn main {
         "verbose",
         long="verbose",
         about="Print every decision and the team-level reads.",
+      ),
+      @argparse.FlagArg(
+        "tournament",
+        long="tournament",
+        about="Round-robin the named comps (scripted vs scripted) and print a win table. Needs no API key.",
+      ),
+      @argparse.FlagArg(
+        "arena",
+        long="arena",
+        about="Round-robin the named comps as pure 3v3 teamfights (composition only). Needs no API key.",
       ),
     ],
     options=[
@@ -296,6 +519,21 @@ async fn main {
         default_values=["60"],
         about="Tick cap; the tie breaks on structure damage.",
       ),
+      @argparse.OptionArg(
+        "a-comp",
+        long="a-comp",
+        about="Team A composition, comma-separated top,jungle,bot (e.g. tank,marksman,mage). Default classic×3.",
+      ),
+      @argparse.OptionArg(
+        "b-comp",
+        long="b-comp",
+        about="Team B composition, comma-separated top,jungle,bot. Default classic×3.",
+      ),
+      @argparse.OptionArg(
+        "replay",
+        long="replay",
+        about="Write the last game's replay to this file (JSON lines) for cmd/moba_replay.",
+      ),
     ],
   )
   let matches = @argparse.parse(cmd) catch {
@@ -317,18 +555,29 @@ async fn main {
     model: opt_value(matches, "model").unwrap_or("jev-latest"),
     team_a: opt_value(matches, "a").unwrap_or("jev"),
     team_b: opt_value(matches, "b").unwrap_or("scripted"),
+    comp_a: split_comp(opt_value(matches, "a-comp")),
+    comp_b: split_comp(opt_value(matches, "b-comp")),
     games: parse_int(opt_value(matches, "games"), 1),
     max_ticks: parse_int(opt_value(matches, "max-ticks"), 60),
     verbose: matches.flags.get("verbose").unwrap_or(false),
+    tournament: matches.flags.get("tournament").unwrap_or(false),
+    arena: matches.flags.get("arena").unwrap_or(false),
+    replay: opt_value(matches, "replay").unwrap_or(""),
   }
-  for kind in [opts.team_a, opts.team_b] {
-    if kind != "jev" && kind != "scripted" {
-      @stdio.stderr.write("moba: team policy must be jev or scripted\n")
-      @sys.exit(1)
-      return
+  // The tournament and arena are scripted-only, so they need neither a valid
+  // team policy nor an API key; skip both checks for them.
+  let offline = opts.tournament || opts.arena
+  if !offline {
+    for kind in [opts.team_a, opts.team_b] {
+      if kind != "jev" && kind != "scripted" {
+        @stdio.stderr.write("moba: team policy must be jev or scripted\n")
+        @sys.exit(1)
+        return
+      }
     }
   }
-  let needs_api = opts.team_a == "jev" || opts.team_b == "jev"
+  let needs_api = !offline &&
+    (opts.team_a == "jev" || opts.team_b == "jev")
   if needs_api && api_key.is_empty() {
     @stdio.stderr.write(
       "moba: no API key; set TYPESAFEAI_API_KEY or pass --api-key\n",
@@ -356,6 +605,15 @@ async fn main {
 
 ///|
 async fn run(opts : Opts) -> Unit {
+  if opts.arena {
+    run_arena(opts.max_ticks)
+  }
+  if opts.tournament {
+    run_tournament(opts.max_ticks)
+  }
+  if opts.arena || opts.tournament {
+    return
+  }
   let client = if opts.base_url == "https://api.typesafe.ai" {
     @lib.Client::new(opts.api_key)
   } else {
@@ -370,9 +628,11 @@ async fn run(opts : Opts) -> Unit {
   let mut b_wins = 0
   let mut draws = 0
   let mut total_ticks = 0
+  let mut last_replay : Array[String] = []
   let wall0 = @env.now()
   for i in 0..<opts.games {
     let r = play_game(opts, client, stats, i)
+    last_replay = r.replay
     total_ticks += r.ticks
     if r.winner == @game.TEAM_A {
       a_wins += 1
@@ -417,6 +677,11 @@ async fn run(opts : Opts) -> Unit {
       println("  scripted fallback ticks after API failures: \{stats.fallback_ticks}")
     }
   }
+  if opts.replay != "" && last_replay.length() > 0 {
+    @fs.write_file(opts.replay, last_replay.join("\n") + "\n")
+    println("  replay of the last game written to \{opts.replay}")
+    println("  play it back:  moon run --target native cmd/moba_replay -- --file \{opts.replay}")
+  }
   println("")
 }
 
@@ -426,6 +691,39 @@ fn opt_value(matches : @argparse.Matches, key : String) -> String? {
     Some(arr) if arr.length() > 0 => Some(arr[0])
     _ => None
   }
+}
+
+///|
+/// Parse a comma-separated composition into exactly three archetype keys. An
+/// empty or absent value is classic×3, so the default game is unchanged. Fewer
+/// than three names are padded with `classic`; extra names are dropped.
+fn split_comp(v : String?) -> Array[String] {
+  let raw = match v {
+    Some(s) => s
+    None => ""
+  }
+  // Split on commas. Spaces are dropped so "tank, marksman" works; champion
+  // keys never contain spaces, so this is safe.
+  let parts : Array[String] = []
+  let cur = StringBuilder()
+  for ch in raw {
+    if ch == ',' {
+      parts.push(cur.to_string())
+      cur.reset()
+    } else if ch != ' ' {
+      cur.write_char(ch)
+    }
+  }
+  parts.push(cur.to_string())
+  let out : Array[String] = []
+  for i in 0..<3 {
+    if i < parts.length() && parts[i] != "" {
+      out.push(parts[i])
+    } else {
+      out.push("classic")
+    }
+  }
+  out
 }
 
 ///|

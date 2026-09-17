@@ -67,9 +67,25 @@ pub fn scripted_action(g : Game, c : Champ) -> Action {
   let here_enemies = g.champs_at(c.node, enemy_team)
   let here_allies = g.champs_at(c.node, c.team)
 
-  // Badly hurt: go home, unless standing next to a kill.
-  let finishable = here_enemies.filter(e => e.hp <= 14)
-  if c.hp <= 35 && finishable.is_empty() {
+  // Focus fire: hit the softest target here (lowest current HP). This is what
+  // makes a durable frontline worth having — a tank draws no more fire than a
+  // marksman, but survives it, so the squishies behind it live.
+  fn softest() -> Champ {
+    let mut pick = here_enemies[0]
+    for e in here_enemies {
+      if e.hp < pick.hp {
+        pick = e
+      }
+    }
+    pick
+  }
+
+  // Badly hurt (below ~35% of this champion's own max), go home unless a kill
+  // is right here. Using a fraction, not a flat number, so a tank does not
+  // flee at the HP a marksman fights on.
+  let low = c.hp * 100 < c.max_hp * 35
+  let finishable = here_enemies.filter(e => e.hp <= 15)
+  if low && finishable.is_empty() {
     if legal.contains(Recall) {
       return Recall
     }
@@ -82,15 +98,15 @@ pub fn scripted_action(g : Game, c : Champ) -> Action {
     // An earlier version backed off on an even matchup, which turned every
     // game into a lane standoff where no structure was ever touched.
     let outnumber = here_allies.length() >= here_enemies.length()
-    let healthier = c.hp >= here_enemies[0].hp
-    if outnumber || healthier || c.hp > 55 {
-      return AttackChamp(here_enemies[0].id)
+    let healthier = c.hp * here_enemies[0].max_hp >= here_enemies[0].hp * c.max_hp
+    if outnumber || healthier || c.hp * 100 > c.max_hp * 55 {
+      return AttackChamp(softest().id)
     }
     let away = step_toward(c.node, base)
     if away != c.node && legal.contains(Move(away)) {
       return Move(away)
     }
-    return AttackChamp(here_enemies[0].id)
+    return AttackChamp(softest().id)
   }
   // Standing under an enemy structure with nobody to fight: hit it.
   if legal.contains(AttackStructure) {
@@ -137,7 +153,13 @@ pub fn Game::observation(self : Game, team : Int, mem : Memory) -> Json {
           "id": Json(c.id),
           "name": Json(c.name),
           "lane": Json(c.role),
+          "kind": Json(c.kind),
+          "deals": Json(if c.dmg_type == DMG_PHYSICAL { "physical" } else { "magic" }),
+          "frontline": Json(c.frontline),
           "hp": Json(c.hp),
+          "max_hp": Json(c.max_hp),
+          "armor": Json(c.armor),
+          "magic_resist": Json(c.mr),
           "at": Json(node_name(c.node)),
           "gold": Json(c.gold),
           "hops_to_enemy_base": Json(hops(c.node, enemy_base)),
@@ -150,6 +172,7 @@ pub fn Game::observation(self : Game, team : Int, mem : Memory) -> Json {
           "id": Json(c.id),
           "name": Json(c.name),
           "lane": Json(c.role),
+          "kind": Json(c.kind),
           "dead_for_ticks": Json(c.respawn),
         }),
       )
@@ -158,11 +181,19 @@ pub fn Game::observation(self : Game, team : Int, mem : Memory) -> Json {
 
   let visible = []
   for e in self.visible_enemies(team) {
+    // Enemy archetype and resists are visible when the champion is: this is
+    // what lets a team notice "they are all physical, focus armor" or "their
+    // carry has low magic resist".
     visible.push(
       Json({
         "id": Json(e.id),
         "name": Json(e.name),
+        "kind": Json(e.kind),
+        "deals": Json(if e.dmg_type == DMG_PHYSICAL { "physical" } else { "magic" }),
+        "frontline": Json(e.frontline),
         "hp": Json(e.hp),
+        "armor": Json(e.armor),
+        "magic_resist": Json(e.mr),
         "at": Json(node_name(e.node)),
       }),
     )

@@ -1,6 +1,7 @@
 import {
   "mizchi/jev-playground/moba" @game,
   "moonbitlang/async",
+  "moonbitlang/async/fs",
   "moonbitlang/async/socket",
   "moonbitlang/core/env",
   "moonbitlang/async/stdio",

@@ -17,6 +17,10 @@ struct Opts {
   games : Int
   max_ticks : Int
   verbose : Bool
+  comp_a : Array[String]
+  comp_b : Array[String]
+  /// If non-empty, each game g is written to `<replay>.gN.jsonl`.
+  replay : String
 }
 
 ///|
@@ -46,6 +50,21 @@ async fn main {
         default_values=["60"],
         about="Tick cap; the tie breaks on structure damage.",
       ),
+      @argparse.OptionArg(
+        "a-comp",
+        long="a-comp",
+        about="Team A composition, comma-separated top,jungle,bot. Default classic×3.",
+      ),
+      @argparse.OptionArg(
+        "b-comp",
+        long="b-comp",
+        about="Team B composition, comma-separated top,jungle,bot. Default classic×3.",
+      ),
+      @argparse.OptionArg(
+        "replay",
+        long="replay",
+        about="Write each game g to <replay>.gN.jsonl for cmd/moba_replay.",
+      ),
     ],
   )
   let matches = @argparse.parse(cmd) catch {
@@ -60,6 +79,9 @@ async fn main {
     games: int_opt(matches, "games", 1),
     max_ticks: int_opt(matches, "max-ticks", 60),
     verbose: matches.flags.get("verbose").unwrap_or(false),
+    comp_a: split_comp(str_opt(matches, "a-comp")),
+    comp_b: split_comp(str_opt(matches, "b-comp")),
+    replay: str_opt(matches, "replay").unwrap_or(""),
   }
   serve(opts) catch {
     err => {
@@ -126,9 +148,13 @@ async fn play_game(
   client_b : Client,
   index : Int,
 ) -> Int raise {
-  let g = @game.Game::new()
+  let g = @game.Game::with_comps(opts.comp_a, opts.comp_b)
   let mem_a = @game.Memory::new()
   let mem_b = @game.Memory::new()
+  let replay = [
+    g.replay_meta("jev", "jev", opts.comp_a, opts.comp_b, opts.max_ticks).stringify(),
+    g.replay_frame().stringify(),
+  ]
   if opts.verbose {
     @stdio.stdout.write("referee: --- game \{index + 1} ---\n")
   }
@@ -170,6 +196,7 @@ async fn play_game(
       }
     }
     g.step(actions)
+    replay.push(g.replay_frame().stringify())
     if opts.verbose && g.log.length() > 0 {
       let last = g.log[g.log.length() - 1]
       if last.has_prefix("t\{g.tick}:") {
@@ -213,6 +240,12 @@ async fn play_game(
   @stdio.stdout.write(
     "referee: game \{index + 1}: \{wlabel} after \{g.tick} ticks (structures A=\{a_hp} B=\{b_hp}); \{per_tick} ms/tick wall\n",
   )
+  if opts.replay != "" {
+    replay.push(g.replay_result(winner).stringify())
+    let path = "\{opts.replay}.g\{index + 1}.jsonl"
+    @fs.write_file(path, replay.join("\n") + "\n")
+    @stdio.stdout.write("referee: replay written to \{path}\n")
+  }
   winner
 }
 
@@ -302,4 +335,42 @@ fn int_opt(matches : @argparse.Matches, key : String, dflt : Int) -> Int {
     Some(arr) if arr.length() > 0 => @string.from_str(arr[0]) catch { _ => dflt }
     _ => dflt
   }
+}
+
+///|
+fn str_opt(matches : @argparse.Matches, key : String) -> String? {
+  match matches.values.get(key) {
+    Some(arr) if arr.length() > 0 => Some(arr[0])
+    _ => None
+  }
+}
+
+///|
+/// Comma-separated composition into exactly three archetype keys; empty means
+/// classic×3. Spaces are dropped (champion keys never contain them).
+fn split_comp(v : String?) -> Array[String] {
+  let raw = match v {
+    Some(s) => s
+    None => ""
+  }
+  let parts : Array[String] = []
+  let cur = StringBuilder()
+  for ch in raw {
+    if ch == ',' {
+      parts.push(cur.to_string())
+      cur.reset()
+    } else if ch != ' ' {
+      cur.write_char(ch)
+    }
+  }
+  parts.push(cur.to_string())
+  let out : Array[String] = []
+  for i in 0..<3 {
+    if i < parts.length() && parts[i] != "" {
+      out.push(parts[i])
+    } else {
+      out.push("classic")
+    }
+  }
+  out
 }

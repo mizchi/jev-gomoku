@@ -48,6 +48,19 @@ pub struct Champ {
   team : Int
   /// Lane this champion starts in; the scripted bot stays loyal to it.
   role : String
+  /// Archetype key (marksman, mage, tank, …); "classic" is the uniform champ.
+  kind : String
+  /// Physical (AD) or magic (AP); see champions.mbt.
+  dmg_type : Int
+  /// Per-tick damage before mitigation and the gold bonus.
+  attack : Int
+  /// Incoming physical / magic mitigation.
+  armor : Int
+  mr : Int
+  /// A durable body that stands between attackers and the backline; see the
+  /// guard rule in `step`. This is the mechanism that makes a frontline worth
+  /// a roster slot despite its low damage.
+  frontline : Bool
   mut hp : Int
   max_hp : Int
   mut node : Int
@@ -91,16 +104,19 @@ pub struct Game {
 }
 
 ///|
-/// Damage a champion deals to a champion or structure in one tick, before the
-/// gold bonus.
-const CHAMP_DAMAGE = 10
+/// Damage a tower deals to an enemy champion standing on it, before the
+/// target's armor. Below a champion's output but high enough that soloing a
+/// tower costs most of a squishy's health bar, so a tank diving in front is a
+/// real synergy: it survives what a marksman cannot.
+const TOWER_DAMAGE = 22
 
 ///|
-/// Damage a tower deals to each enemy champion standing on it. Deliberately
-/// below a champion's output but high enough that soloing a tower costs most
-/// of a health bar: two champions take it comfortably, one barely, which is
-/// what makes grouping a real decision rather than a flavour note.
-const TOWER_DAMAGE = 8
+/// Structures have modest resists so both damage types work on them, and a
+/// pure-AP or pure-AD siege is only mildly slower than a mixed one.
+const STRUCT_ARMOR = 15
+
+///|
+const STRUCT_MR = 15
 
 ///|
 const HEAL_AT_BASE = 25
@@ -109,47 +125,51 @@ const HEAL_AT_BASE = 25
 const RESPAWN_TICKS = 6
 
 ///|
-/// Gold buys damage: every 100 gold is one more damage per hit. It gives
-/// farming a reason to exist without needing items.
-fn champ_damage(c : Champ) -> Int {
-  CHAMP_DAMAGE + c.gold / 100
+/// The classic uniform game: both sides three `classic` champions. Reproduces
+/// the pre-archetype behaviour of docs/02.
+pub fn Game::new() -> Game {
+  Game::with_comps(["classic", "classic", "classic"], [
+    "classic", "classic", "classic",
+  ])
 }
 
 ///|
-pub fn Game::new() -> Game {
+/// A game with an explicit archetype per lane for each side. `comp_a[i]` and
+/// `comp_b[i]` are the archetype keys for the top / jungle / bot champions.
+pub fn Game::with_comps(comp_a : Array[String], comp_b : Array[String]) -> Game {
   let champs = []
   let roles = ["top", "jungle", "bot"]
   let a_start = [1, 8, 5]
   let b_start = [3, 10, 7]
-  for i in 0..<3 {
-    champs.push({
-      id: i,
-      name: "A_\{roles[i]}",
-      team: TEAM_A,
+  fn make(i : Int, team : Int, start : Int, comp : Array[String]) -> Champ {
+    let k = kind_of(comp[i])
+    let prefix = if team == TEAM_A { "A" } else { "B" }
+    {
+      id: (if team == TEAM_A { 0 } else { 3 }) + i,
+      name: "\{prefix}_\{roles[i]}",
+      team,
       role: roles[i],
-      hp: 100,
-      max_hp: 100,
-      node: a_start[i],
+      kind: k.key,
+      dmg_type: k.dmg_type,
+      attack: k.attack,
+      armor: k.armor,
+      mr: k.mr,
+      frontline: k.frontline,
+      hp: k.max_hp,
+      max_hp: k.max_hp,
+      node: start,
       gold: 0,
       respawn: 0,
       kills: 0,
       deaths: 0,
-    })
+    }
+  }
+
+  for i in 0..<3 {
+    champs.push(make(i, TEAM_A, a_start[i], comp_a))
   }
   for i in 0..<3 {
-    champs.push({
-      id: 3 + i,
-      name: "B_\{roles[i]}",
-      team: TEAM_B,
-      role: roles[i],
-      hp: 100,
-      max_hp: 100,
-      node: b_start[i],
-      gold: 0,
-      respawn: 0,
-      kills: 0,
-      deaths: 0,
-    })
+    champs.push(make(i, TEAM_B, b_start[i], comp_b))
   }
   let structures = [
     { node: 1, team: TEAM_A, hp: 100, max_hp: 100, is_base: false },
@@ -191,6 +211,43 @@ pub fn Game::base_exposed(self : Game, team : Int) -> Bool {
     }
   }
   true
+}
+
+///|
+/// Who actually takes a blow aimed at `target` on `node`. A frontliner stands
+/// between attackers and the backline: if `target` is a squishy and its team
+/// has a living frontline champion on the same node, that frontliner soaks the
+/// hit instead (the highest-HP one — the freshest wall). This is the whole
+/// reason to run a tank: without it, focus fire deletes the carries and a
+/// durable body is just a low-damage roster slot. A champion attacking the
+/// frontliner directly, or a team with no frontline up, is unaffected.
+pub fn Game::guarded_target(self : Game, target : Champ, node : Int) -> Champ {
+  if target.frontline {
+    return target
+  }
+  let mut wall = target
+  let mut found = false
+  for ally in self.champs {
+    if ally.team == target.team &&
+      ally.alive() &&
+      ally.node == node &&
+      ally.frontline {
+      if !found || ally.hp > wall.hp {
+        wall = ally
+        found = true
+      }
+    }
+  }
+  wall
+}
+
+///|
+/// Put every living champion on one node. Used only by the teamfight arena, to
+/// force a 3v3 on a single node with no map macro in the way.
+pub fn Game::place_all(self : Game, node : Int) -> Unit {
+  for c in self.champs {
+    c.node = node
+  }
 }
 
 ///|
@@ -307,53 +364,117 @@ pub fn Game::step(self : Game, actions : Map[Int, Action]) -> Unit {
     }
   }
 
-  // Then the actions that need a target in the resolved position.
+  // Combat is resolved simultaneously: every attacker's damage is computed
+  // against the state at the START of this phase, accumulated, and only then
+  // applied. So in a mutual lethal both champions land their blow and both
+  // die — there is no advantage to being resolved first, which the id-ordered
+  // version quietly gave team A.
+  let champ_dmg : Map[Int, Int] = Map([])
+  // For gold/kill credit: the single largest hit on each dying target.
+  let top_hit : Map[Int, (Int, Int)] = Map([]) // target -> (attacker id, dmg)
+  let struct_dmg : Map[Int, Int] = Map([]) // structure index -> damage
+  let struct_top : Map[Int, (Int, Int)] = Map([])
+  fn note_top(m : Map[Int, (Int, Int)], key : Int, attacker : Int, dmg : Int) {
+    match m.get(key) {
+      Some((_, best)) => if dmg > best { m[key] = (attacker, dmg) }
+      None => m[key] = (attacker, dmg)
+    }
+  }
+
   for c in self.champs {
     if !c.alive() {
       continue
     }
     match actions.get(c.id) {
       Some(AttackChamp(target_id)) => {
-        let target = self.champs[target_id]
-        if target.team != c.team && target.alive() && target.node == c.node {
-          target.hp -= champ_damage(c)
-          if target.hp <= 0 {
-            c.kills += 1
-            c.gold += 150
-            target.deaths += 1
-            target.respawn = RESPAWN_TICKS
-            target.hp = 0
-            events.push("\{c.name} killed \{target.name} at \{node_name(c.node)}")
-          }
+        let aimed = self.champs[target_id]
+        // `alive()` reads pre-combat state, so a champion being killed this same
+        // tick is still a valid target and still gets to strike back. The
+        // frontline guard then decides who actually eats the blow.
+        if aimed.team != c.team && aimed.alive() && aimed.node == c.node {
+          let target = self.guarded_target(aimed, c.node)
+          let d = c.damage_to(target.armor, target.mr)
+          champ_dmg[target.id] = champ_dmg.get(target.id).unwrap_or(0) + d
+          note_top(top_hit, target.id, c.id, d)
         }
       }
-      Some(AttackStructure) =>
-        match self.structure_at(c.node) {
-          Some(s) =>
-            if s.team != c.team && (!s.is_base || self.base_exposed(s.team)) {
-              s.hp -= champ_damage(c)
-              if s.hp <= 0 {
-                s.hp = 0
-                c.gold += 100
-                let what = if s.is_base { "BASE" } else { "tower" }
-                events.push("\{c.name} destroyed the \{what} at \{node_name(s.node)}")
-              }
-            }
-          None => ()
+      Some(AttackStructure) => {
+        let mut idx = 0
+        for si in 0..<self.structures.length() {
+          let s = self.structures[si]
+          if s.node == c.node && s.alive() {
+            idx = si
+          }
         }
+        let s = self.structures[idx]
+        if s.node == c.node &&
+          s.alive() &&
+          s.team != c.team &&
+          (!s.is_base || self.base_exposed(s.team)) {
+          let d = c.damage_to(STRUCT_ARMOR, STRUCT_MR)
+          struct_dmg[idx] = struct_dmg.get(idx).unwrap_or(0) + d
+          note_top(struct_top, idx, c.id, d)
+        }
+      }
       Some(Farm) => c.gold += camp_gold(c.node)
       _ => ()
     }
   }
 
-  // Towers punish anyone standing on them.
+  // Apply champion damage, then decide deaths — all at once.
+  for entry in champ_dmg {
+    let (id, d) = entry
+    let target = self.champs[id]
+    if !target.alive() {
+      continue
+    }
+    target.hp -= d
+    if target.hp <= 0 {
+      target.hp = 0
+      target.deaths += 1
+      target.respawn = RESPAWN_TICKS
+      match top_hit.get(id) {
+        Some((killer_id, _)) => {
+          let killer = self.champs[killer_id]
+          killer.kills += 1
+          killer.gold += 150
+          events.push("\{killer.name} killed \{target.name} at \{node_name(target.node)}")
+        }
+        None => ()
+      }
+    }
+  }
+  for entry in struct_dmg {
+    let (idx, d) = entry
+    let s = self.structures[idx]
+    if !s.alive() {
+      continue
+    }
+    s.hp -= d
+    if s.hp <= 0 {
+      s.hp = 0
+      match struct_top.get(idx) {
+        Some((who, _)) => self.champs[who].gold += 100
+        None => ()
+      }
+      let what = if s.is_base { "BASE" } else { "tower" }
+      let by = match struct_top.get(idx) {
+        Some((who, _)) => self.champs[who].name
+        None => "someone"
+      }
+      events.push("\{by} destroyed the \{what} at \{node_name(s.node)}")
+    }
+  }
+
+  // Towers punish anyone still standing on them, mitigated by armor — so a
+  // tank can dive where a marksman would die.
   for s in self.structures {
     if !s.alive() {
       continue
     }
     let enemy = if s.team == TEAM_A { TEAM_B } else { TEAM_A }
     for c in self.champs_at(s.node, enemy) {
-      c.hp -= TOWER_DAMAGE
+      c.hp -= TOWER_DAMAGE * 100 / (100 + c.armor)
       if c.hp <= 0 {
         c.hp = 0
         c.deaths += 1
