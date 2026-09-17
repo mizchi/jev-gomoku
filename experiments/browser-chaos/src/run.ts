@@ -11,7 +11,7 @@
  * completed (#/confirm), and for the Jev arm what it cost.
  */
 import { chaos, weightedRandomDriver } from "chaosbringer";
-import { Jev } from "./jev.js";
+import { Jev } from "../../shared/jev.js";
 import { jevDriver, recordingDriver } from "./jev-driver.js";
 import { serve } from "./serve.mjs";
 import { existsSync } from "node:fs";

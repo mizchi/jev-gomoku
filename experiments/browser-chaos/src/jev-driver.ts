@@ -16,7 +16,7 @@
  *   confident click on a decoy.
  */
 import type { Driver, DriverPick, DriverStep } from "chaosbringer";
-import { Jev, choice, noul, type Question } from "./jev.js";
+import { Jev, choice, noul, type Question } from "../../shared/jev.js";
 
 export interface JevDriverOptions {
   jev: Jev;

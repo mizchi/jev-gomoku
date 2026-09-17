@@ -14,7 +14,7 @@
  * are shared; the only difference between arms is which index gets picked.
  */
 import type { Page } from "playwright";
-import { Jev, choice, noul, type Question } from "./jev.js";
+import { Jev, choice, noul, type Question } from "../../shared/jev.js";
 
 export interface Candidate {
   index: number;

@@ -10,7 +10,7 @@
  */
 import { chromium } from "playwright";
 import { existsSync } from "node:fs";
-import { Jev } from "./jev.js";
+import { Jev } from "../../shared/jev.js";
 import { jevPicker, randomPicker, runSteps, type RunResult } from "./spa-bench.js";
 import { serve } from "./serve.mjs";
 
