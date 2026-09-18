@@ -43,6 +43,7 @@ MoonBit 側(`lib/` `report/` `moba/` `cmd/*`)と TypeScript 側(`experiments/*`)
 | **提案は「決定」ではなく「助言」として渡す** | 提案単独 10.3% → agent が見て決めて 5.9% | [cookbook](https://docs.typesafe.ai/cookbooks/skill_suggestion) | [08](08-skill-suggestion.md#42-提案は決定ではなく助言として効いている) |
 | **state に stat を渡せば「選ぶ」問題も解ける** | 素の数値から編成をドラフト。Jev 順位 ≈ 実測、最強を conf 0.76 で | 本リポジトリ | [11](11-synergy.md#5-jev-は編成を選べるか--ドラフト) |
 | **上流の小さなミスは下流の正しい判断で買い戻せる** | 弱いドラフト+Jev が 強いドラフト+scripted に 5-1。ただし相手も上手いと戻る | 本リポジトリ | [12](12-comeback.md) |
+| **行動の質が買い戻せる戦略赤字は有限で、相手の強さに反比例** | handicap sweep で境界 = scripted 相手 ~20-30%、smart 相手 <20% | 本リポジトリ | [12](12-comeback.md#9-追記--取り返せる赤字の境界) |
 
 > 一番効いたのは合成ロジックではなく**答えの形**でした。コード側の閾値をどう捏ねても
 > 14/24 のままだったものが、`choice` → `score` の一手で 19 → 23 になっています。
