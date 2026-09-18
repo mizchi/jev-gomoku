@@ -17,6 +17,7 @@ moon run --target native cmd/moba -- --a jev --b scripted      # 02: 3v3 MOBA
 cd experiments/chess          && npm i && npx tsx src/run.ts   # 03: チェス vs Sonnet 5
 cd experiments/agent-questions && npm i && npx tsx src/run.ts  # 04: エージェントに質問を書かせる
 cd experiments/browser-chaos  && npm i && npx tsx src/run-spa.ts # 05: ブラウザ探索
+python3 -m http.server -d web 8000                             # 11: リプレイを Web 再生 → :8000/replay.html
 ```
 
 MoonBit 側(`lib/` `report/` `moba/` `cmd/*`)と TypeScript 側(`experiments/*`)に
