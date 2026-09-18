@@ -37,6 +37,8 @@ struct Opts {
   /// --comeback: the wrong-draft and right-draft comp names.
   comeback_bad : String
   comeback_good : String
+  /// --comeback: the "poor actions" baseline policy (scripted or smart).
+  comeback_baseline : String
   /// If non-empty, write the last game's replay to this file as JSON lines.
   replay : String
 }
@@ -249,7 +251,11 @@ async fn play_game(
       } else {
         for c in g.champs {
           if c.team == team && c.alive() {
-            actions[c.id] = @game.scripted_action(g, c)
+            actions[c.id] = if kind == "smart" {
+              @game.smart_action(g, c)
+            } else {
+              @game.scripted_action(g, c)
+            }
           }
         }
       }
@@ -523,6 +529,7 @@ fn cell_opts(
     comeback: false,
     comeback_bad: base.comeback_bad,
     comeback_good: base.comeback_good,
+    comeback_baseline: base.comeback_baseline,
     replay,
   }
 }
@@ -589,6 +596,7 @@ async fn comeback_cell(
 async fn run_comeback(opts : Opts, client : @lib.Client) -> Unit {
   let bad_name = opts.comeback_bad
   let good_name = opts.comeback_good
+  let base_policy = opts.comeback_baseline
   let bad = comp_by_name(bad_name)
   let good = comp_by_name(good_name)
   let n = if opts.games < 2 { 4 } else { opts.games }
@@ -598,14 +606,15 @@ async fn run_comeback(opts : Opts, client : @lib.Client) -> Unit {
   )
   let stats = Stats::new()
   println(
-    "  correct actions = Jev, poor actions = scripted; BAD plays both sides\n",
+    "  correct actions = Jev, poor actions = \{base_policy}; BAD plays both sides\n",
   )
 
-  // 1. Equal play: scripted vs scripted, deterministic, 1 game per side.
+  // 1. Equal play: baseline vs baseline (both bots are deterministic, so 1
+  //    game per side is enough).
   let (e_w, e_l, e_d) = comeback_cell(
-    opts, client, stats, bad, good, "scripted", "scripted", 1, "",
+    opts, client, stats, bad, good, base_policy, base_policy, 1, "",
   )
-  // 2. The scenario: BAD played by Jev, GOOD played by the scripted bot.
+  // 2. The scenario: BAD played by Jev, GOOD played by the baseline bot.
   let (s_w, s_l, s_d) = comeback_cell(
     opts,
     client,
@@ -613,7 +622,7 @@ async fn run_comeback(opts : Opts, client : @lib.Client) -> Unit {
     bad,
     good,
     "jev",
-    "scripted",
+    base_policy,
     n,
     opts.replay,
   )
@@ -631,17 +640,18 @@ async fn run_comeback(opts : Opts, client : @lib.Client) -> Unit {
     }
   }
 
+  let bl = base_policy
   println(
-    "  cell                                  BAD(\{bad_name}) W-L-D   →",
+    "  cell                                          BAD(\{bad_name}) W-L-D   →",
   )
   println(
-    "   1. equal play    scripted vs scripted   \{pad("\{e_w}-\{e_l}-\{e_d}", 9)} \{verdict(e_w, e_l)}",
+    "   1. equal play  \{pad(bl, 8)} vs \{pad(bl, 8)}         \{pad("\{e_w}-\{e_l}-\{e_d}", 7)} \{verdict(e_w, e_l)}",
   )
   println(
-    "   2. scenario      BAD+Jev  vs GOOD+scripted  \{pad("\{s_w}-\{s_l}-\{s_d}", 6)} \{verdict(s_w, s_l)}",
+    "   2. scenario    BAD+Jev  vs GOOD+\{pad(bl, 8)}     \{pad("\{s_w}-\{s_l}-\{s_d}", 7)} \{verdict(s_w, s_l)}",
   )
   println(
-    "   3. ceiling       BAD+Jev  vs GOOD+Jev       \{pad("\{c_w}-\{c_l}-\{c_d}", 6)} \{verdict(c_w, c_l)}",
+    "   3. ceiling     BAD+Jev  vs GOOD+Jev           \{pad("\{c_w}-\{c_l}-\{c_d}", 7)} \{verdict(c_w, c_l)}",
   )
   println("")
   if e_l > e_w && s_w > s_l {
@@ -929,6 +939,11 @@ async fn main {
         long="good",
         about="--comeback: the RIGHT-draft comp name (default bruiser_mix).",
       ),
+      @argparse.OptionArg(
+        "baseline",
+        long="baseline",
+        about="--comeback: the poor-actions baseline policy, scripted or smart (default scripted).",
+      ),
     ],
   )
   let matches = @argparse.parse(cmd) catch {
@@ -961,6 +976,7 @@ async fn main {
     comeback: matches.flags.get("comeback").unwrap_or(false),
     comeback_bad: opt_value(matches, "bad").unwrap_or("glass_ad"),
     comeback_good: opt_value(matches, "good").unwrap_or("bruiser_mix"),
+    comeback_baseline: opt_value(matches, "baseline").unwrap_or("scripted"),
     replay: opt_value(matches, "replay").unwrap_or(""),
   }
   // The tournament and arena are scripted-only, so they need neither a valid
@@ -968,8 +984,10 @@ async fn main {
   let offline = opts.tournament || opts.arena
   if !offline {
     for kind in [opts.team_a, opts.team_b] {
-      if kind != "jev" && kind != "scripted" {
-        @stdio.stderr.write("moba: team policy must be jev or scripted\n")
+      if kind != "jev" && kind != "scripted" && kind != "smart" {
+        @stdio.stderr.write(
+          "moba: team policy must be jev, scripted, or smart\n",
+        )
         @sys.exit(1)
         return
       }
