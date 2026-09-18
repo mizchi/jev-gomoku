@@ -39,6 +39,12 @@ struct Opts {
   comeback_good : String
   /// --comeback: the "poor actions" baseline policy (scripted or smart).
   comeback_baseline : String
+  /// Boundary sweep: same comp both sides, Jev handicapped, find where the
+  /// recovery fails. Needs an API key.
+  boundary : Bool
+  /// Per-team stat handicap in percent (100 = full). Scales attack and HP.
+  hcap_a : Int
+  hcap_b : Int
   /// If non-empty, write the last game's replay to this file as JSON lines.
   replay : String
 }
@@ -204,7 +210,12 @@ async fn play_game(
   stats : Stats,
   index : Int,
 ) -> GameResult {
-  let g = @game.Game::with_comps(opts.comp_a, opts.comp_b)
+  let g = @game.Game::with_handicap(
+    opts.comp_a,
+    opts.comp_b,
+    opts.hcap_a,
+    opts.hcap_b,
+  )
   let mem_a = @game.Memory::new()
   let mem_b = @game.Memory::new()
   let replay = [
@@ -491,6 +502,96 @@ fn run_tournament(max_ticks : Int) -> Unit {
 }
 
 ///|
+/// One boundary cell: same comp both sides, the Jev team handicapped to `pct`
+/// percent stats, the baseline team at full. Jev plays the handicapped side on
+/// both sides for `n` games each (cancels side effect). Returns the Jev team's
+/// record (wins, losses, draws).
+async fn boundary_cell(
+  base : Opts,
+  client : @lib.Client,
+  stats : Stats,
+  comp : Array[String],
+  baseline : String,
+  pct : Int,
+  n : Int,
+) -> (Int, Int, Int) {
+  let mut wins = 0
+  let mut losses = 0
+  let mut draws = 0
+  for side in [0, 1] {
+    for i in 0..<n {
+      // The handicapped Jev team is on `side`; the full baseline is the other.
+      let o = if side == 0 {
+        cell_opts(base, "jev", comp, baseline, comp, pct, 100, "")
+      } else {
+        cell_opts(base, baseline, comp, "jev", comp, 100, pct, "")
+      }
+      let r = play_game(o, client, stats, i)
+      let jev_team = if side == 0 { @game.TEAM_A } else { @game.TEAM_B }
+      if r.winner == 0 {
+        draws += 1
+      } else if r.winner == jev_team {
+        wins += 1
+      } else {
+        losses += 1
+      }
+    }
+  }
+  (wins, losses, draws)
+}
+
+///|
+/// The boundary sweep. Both teams draft the SAME comp, so the only differences
+/// are the Jev team's stat handicap and that Jev pilots it while the baseline
+/// bot pilots the full-stat mirror. Sweeping the handicap down finds where
+/// Jev's action edge can no longer buy back the deficit — the point at which a
+/// draft/economy gap becomes unrecoverable. A weak baseline (scripted) gives
+/// the largest recoverable deficit; a stronger one (smart) shrinks it.
+async fn run_boundary(opts : Opts, client : @lib.Client) -> Unit {
+  let comp = opts.comp_a
+  let baseline = opts.comeback_baseline
+  let n = if opts.games < 2 { 4 } else { opts.games }
+  let pcts = [100, 80, 60, 40, 25]
+  @report.header(
+    "MOBA boundary — how large a deficit can correct actions buy back",
+    "same comp [\{comp.join("/")}] both sides; Jev(handicapped) vs \{baseline}(full)",
+  )
+  let stats = Stats::new()
+  println("  Jev pilots the handicapped side (both sides, \{n} games each)\n")
+  println("  handicap   Jev(bad) W-L-D   →")
+  let mut crossed = false
+  for pct in pcts {
+    let (w, l, d) = boundary_cell(opts, client, stats, comp, baseline, pct, n)
+    let verdict = if w > l {
+      "recovers"
+    } else if l > w {
+      "cannot"
+    } else {
+      "even"
+    }
+    let mark = if w <= l && !crossed {
+      crossed = true
+      "  <- boundary"
+    } else {
+      ""
+    }
+    println(
+      "   \{pad("\{pct}%", 9)} \{pad("\{w}-\{l}-\{d}", 8)}      \{verdict}\{mark}",
+    )
+  }
+  println("")
+  println(
+    "  Jev's action edge (vs \{baseline}) buys back a deficit down to the boundary above.",
+  )
+  if stats.requests > 0 {
+    println(
+      "  \{stats.requests} Jev requests, \{stats.input_tokens} input tokens (~$\{@report.fixed(stats.input_tokens.to_double() / 1000000.0 * 0.042, 4)})",
+    )
+  }
+  println("")
+}
+
+///|
 /// A named composition's champion picks, or classic×3 if the name is unknown.
 fn comp_by_name(name : String) -> Array[String] {
   for c in @game.tournament_comps {
@@ -510,6 +611,8 @@ fn cell_opts(
   comp_a : Array[String],
   team_b : String,
   comp_b : Array[String],
+  hcap_a : Int,
+  hcap_b : Int,
   replay : String,
 ) -> Opts {
   {
@@ -530,6 +633,9 @@ fn cell_opts(
     comeback_bad: base.comeback_bad,
     comeback_good: base.comeback_good,
     comeback_baseline: base.comeback_baseline,
+    boundary: false,
+    hcap_a,
+    hcap_b,
     replay,
   }
 }
@@ -557,9 +663,9 @@ async fn comeback_cell(
   for side in [0, 1] {
     for i in 0..<n {
       let o = if side == 0 {
-        cell_opts(base, bad_policy, bad, good_policy, good, "")
+        cell_opts(base, bad_policy, bad, good_policy, good, 100, 100, "")
       } else {
-        cell_opts(base, good_policy, good, bad_policy, bad, "")
+        cell_opts(base, good_policy, good, bad_policy, bad, 100, 100, "")
       }
       let r = play_game(o, client, stats, i)
       let bad_team = if side == 0 { @game.TEAM_A } else { @game.TEAM_B }
@@ -872,6 +978,11 @@ async fn main {
         long="comeback",
         about="Can a wrong draft + correct actions (Jev) recover vs a right draft + poor actions (scripted)?",
       ),
+      @argparse.FlagArg(
+        "boundary",
+        long="boundary",
+        about="Sweep a stat handicap on the Jev team (same comp both sides) to find the unrecoverable deficit.",
+      ),
     ],
     options=[
       @argparse.OptionArg(
@@ -942,7 +1053,19 @@ async fn main {
       @argparse.OptionArg(
         "baseline",
         long="baseline",
-        about="--comeback: the poor-actions baseline policy, scripted or smart (default scripted).",
+        about="--comeback/--boundary: the poor-actions baseline policy, scripted or smart (default scripted).",
+      ),
+      @argparse.OptionArg(
+        "hcap-a",
+        long="hcap-a",
+        default_values=["100"],
+        about="Team A stat handicap in percent (100 = full); scales attack and HP.",
+      ),
+      @argparse.OptionArg(
+        "hcap-b",
+        long="hcap-b",
+        default_values=["100"],
+        about="Team B stat handicap in percent (100 = full); scales attack and HP.",
       ),
     ],
   )
@@ -977,6 +1100,9 @@ async fn main {
     comeback_bad: opt_value(matches, "bad").unwrap_or("glass_ad"),
     comeback_good: opt_value(matches, "good").unwrap_or("bruiser_mix"),
     comeback_baseline: opt_value(matches, "baseline").unwrap_or("scripted"),
+    boundary: matches.flags.get("boundary").unwrap_or(false),
+    hcap_a: parse_int(opt_value(matches, "hcap-a"), 100),
+    hcap_b: parse_int(opt_value(matches, "hcap-b"), 100),
     replay: opt_value(matches, "replay").unwrap_or(""),
   }
   // The tournament and arena are scripted-only, so they need neither a valid
@@ -997,6 +1123,7 @@ async fn main {
     (
       opts.draft ||
       opts.comeback ||
+      opts.boundary ||
       opts.team_a == "jev" ||
       opts.team_b == "jev"
     )
@@ -1047,6 +1174,10 @@ async fn run(opts : Opts) -> Unit {
   }
   if opts.comeback {
     run_comeback(opts, client)
+    return
+  }
+  if opts.boundary {
+    run_boundary(opts, client)
     return
   }
   let stats = Stats::new()
